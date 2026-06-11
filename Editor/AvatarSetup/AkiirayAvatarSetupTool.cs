@@ -66,6 +66,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private const string LLCV1SettingsTypeName = "io.github.azukimochi.LightLimitChangerSettings";
     private const string LLCV2ContextMenuTypeName = "io.github.azukimochi.LightLimitChangerContextMenu";
     private const string LLCV1InstallerTypeName = "io.github.azukimochi.LightLimitChanger";
+    private const string LLCContextMenuTypeName = "io.github.azukimochi.LightLimitChangerContextMenu";
     private static readonly string[] LLCInstalledTypeNames =
     {
         LLCV2ComponentTypeName,
@@ -465,6 +466,10 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AppendTypeLine(sb, "LAC", LACTypeName);
         AppendTypeLine(sb, "LAC Preset Enum", LACPresetEnumTypeName);
         AppendLightLimitChangerDependencyStatus(sb);
+        AppendTypeLine(sb, "LightLimitChanger V2 Component", LLCV2ComponentTypeName);
+        AppendTypeLine(sb, "LightLimitChanger V1 Settings", LLCV1SettingsTypeName);
+        AppendTypeLine(sb, "LightLimitChanger Official Setup", LLCContextMenuTypeName);
+        AppendPrefabCandidateLine(sb, "LightLimitChanger Prefab", LLCPrefabNames);
         AppendTypeLine(sb, "KawaiiPosing Component", KawaiiComponentTypeName);
         AppendTypeLine(sb, "PosingSystem Official AddPrefab", PosingSystemMenuItemsTypeName);
         AppendTypeLine(sb, "RedNight NadeSystem", NadeSettingsTypeName);
@@ -738,6 +743,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
 
         var setupMethod = FindLightLimitChangerV2SetupMethod();
+        var setupType = FindType(LLCContextMenuTypeName);
+        var setupMethod = setupType?.GetMethod("Setup", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
         if (setupMethod != null)
         {
             if (!apply)
@@ -798,6 +805,27 @@ public class AkiirayAvatarSetupTool : EditorWindow
             return;
         }
 
+        InstallLightLimitChangerPrefabFallback(sb, avatarRoot, apply);
+    }
+
+    private bool IsLightLimitChangerInstalled(GameObject avatarRoot)
+    {
+        if (GetComponentsInChildrenByTypeNames(avatarRoot, LLCInstalledTypeNames).Count > 0)
+            return true;
+
+        return avatarRoot.GetComponentsInChildren<Transform>(true)
+            .Any(t => LLCPrefabNames.Contains(t.name));
+    }
+
+    private void InstallLightLimitChangerPrefabFallback(StringBuilder sb, GameObject avatarRoot, bool apply)
+    {
+        var prefab = FindPrefabByNames(LLCPrefabNames);
+        if (prefab == null)
+        {
+            sb.AppendLine("LightLimitChanger: [SKIP] Official Setup() not found and prefab not found. Tried: " + string.Join(", ", LLCPrefabNames));
+            return;
+        }
+
         if (!PrefabHasAnyComponentType(prefab, LLCInstalledTypeNames))
         {
             sb.AppendLine("LightLimitChanger: [WARN] Prefab found but known V1/V2 component types were not detected: " + AssetDatabase.GetAssetPath(prefab));
@@ -806,6 +834,16 @@ public class AkiirayAvatarSetupTool : EditorWindow
         if (!apply)
         {
             sb.AppendLine("LightLimitChanger: [DRY] Instantiate prefab " + AssetDatabase.GetAssetPath(prefab) + " under " + avatarRoot.name + " (V1 fallback)");
+            return;
+        }
+
+        var instanceObj = PrefabUtility.InstantiatePrefab(prefab, avatarRoot.transform) as GameObject;
+        if (instanceObj == null)
+        {
+            sb.AppendLine("LightLimitChanger: [ERROR] InstantiatePrefab returned null");
+            return;
+        }
+
             return;
         }
 
