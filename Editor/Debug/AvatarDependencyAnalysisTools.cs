@@ -75,6 +75,22 @@ namespace Akiiray.VRCAvatarToolkitPlus.Editor
             ),
 
             new DependencyTypeDefinition(
+                "LightLimitChanger",
+                new []
+                {
+                    "io.github.azukimochi.LightLimitChangerComponent",
+                    "io.github.azukimochi.LightLimitChangerSettings"
+                },
+                new []
+                {
+                    "io.github.azukimochi.light-limit-changer",
+                    "LightLimitChanger",
+                    "Light Limit Changer",
+                    "azukimochi"
+                }
+            ),
+
+            new DependencyTypeDefinition(
                 "VRC SDK Avatars",
                 new []
                 {
