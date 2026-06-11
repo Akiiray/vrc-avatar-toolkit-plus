@@ -33,6 +33,14 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AllProjectPrefabs
     }
 
+    private static readonly GUIContent[] TargetModeLabels =
+    {
+        new GUIContent("Hierarchyで選択中のアバター"),
+        new GUIContent("Projectで選択中のPrefab"),
+        new GUIContent("Projectで選択中フォルダ内のPrefab"),
+        new GUIContent("Project内の全Prefab"),
+    };
+
     private sealed class SetupTarget
     {
         public bool IsPrefabAsset;
@@ -48,6 +56,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private TargetMode targetMode = TargetMode.SelectedHierarchyAvatars;
     private string selectedFolderPath = "";
     private bool requireAvatarDescriptor = true;
+    private bool toolStatusChecked = false;
+    private readonly List<GameObject> hierarchyAvatarSlots = new List<GameObject>();
 
     private bool addAAO = true;
     private bool addLAC = true;
@@ -86,34 +96,40 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private const string PosingSystemMenuItemsTypeName = "jp.unisakistudio.posingsystemeditor.PosingSystemMenuItems";
     private const string NadeSettingsTypeName = "RedNightWorks.NadeSystem.NadeSystemSettings";
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Window", false, 0)]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/導入ウィンドウ", false, 0)]
     public static void Open()
     {
-        GetWindow<AkiirayAvatarSetupTool>("VRC Avatar Toolkit Plus - Avatar Setup");
+        var window = GetWindow<AkiirayAvatarSetupTool>("VRC Avatar Toolkit Plus - Avatar Setup");
+        window.InitializeHierarchySlotsFromSelectionIfNeeded();
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Add AAO Only")]
+    private void OnEnable()
+    {
+        InitializeHierarchySlotsFromSelectionIfNeeded();
+    }
+
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/Add AAO Only")]
     public static void MenuAddAAOOnly() { OpenAndRunPreset(addAAO: true); }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Add LAC Only")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/Add LAC Only")]
     public static void MenuAddLACOnly() { OpenAndRunPreset(addLAC: true); }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Add RBS Suimin V2 Only")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/Add RBS Suimin V2 Only")]
     public static void MenuAddRBSOnly() { OpenAndRunPreset(addRBS: true); }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Add Nade System Only")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/Add Nade System Only")]
     public static void MenuAddNadeOnly() { OpenAndRunPreset(addNadeSystem: true); }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Add LightLimitChanger Only")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/Add LightLimitChanger Only")]
     public static void MenuAddLightLimitChangerOnly() { OpenAndRunPreset(addLightLimitChanger: true); }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Add Kawaii Pose Only/可愛いポーズ")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/Add Kawaii Pose Only/可愛いポーズ")]
     public static void MenuAddKawaiiNormalOnly() { OpenAndRunPreset(addKawaiiNormal: true); }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Add Kawaii Pose Only/可愛いポーズ(8bit・足の高さなし)")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/Add Kawaii Pose Only/可愛いポーズ(8bit・足の高さなし)")]
     public static void MenuAddKawaii8bitOnly() { OpenAndRunPreset(addKawaii8bitNoFoot: true); }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Setup All")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/Setup All")]
     public static void MenuSetupAll() { OpenAndRunPreset(addAAO: true, addLAC: true, addRBS: true, addNadeSystem: true, addLightLimitChanger: true, addKawaii8bitNoFoot: true); }
 
     private static void OpenAndRunPreset(
@@ -133,20 +149,25 @@ public class AkiirayAvatarSetupTool : EditorWindow
         window.addLightLimitChanger = addLightLimitChanger;
         window.addKawaiiNormal = addKawaiiNormal;
         window.addKawaii8bitNoFoot = addKawaii8bitNoFoot;
+        window.InitializeHierarchySlotsFromSelectionIfNeeded();
         window.Focus();
     }
 
     private void OnGUI()
     {
         EditorGUILayout.LabelField("VRC Avatar Toolkit Plus - Avatar Setup", EditorStyles.boldLabel);
+        List<SetupTarget> previewTargets = null;
 
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            EditorGUILayout.LabelField("ツール導入確認", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("ツール導入状態", EditorStyles.boldLabel);
+            if (!toolStatusChecked)
+                EditorGUILayout.HelpBox("最初に導入状態チェックを実行すると、各ツールが導入済みか未導入かを判定して表示します。", MessageType.Info);
             DrawDependencyOverview();
 
-            if (GUILayout.Button("依存関係・導入状態チェック", GUILayout.Height(28)))
+            if (GUILayout.Button("導入状態チェック", GUILayout.Height(28)))
             {
+                toolStatusChecked = true;
                 detailedLog = Run(false, true);
                 log = BuildConciseLog(detailedLog);
             }
@@ -155,7 +176,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         using (new EditorGUILayout.VerticalScope("box"))
         {
             EditorGUILayout.LabelField("対象", EditorStyles.boldLabel);
-            targetMode = (TargetMode)EditorGUILayout.EnumPopup("対象モード", targetMode);
+            DrawTargetModePopup();
             requireAvatarDescriptor = EditorGUILayout.ToggleLeft("VRCAvatarDescriptorがあるPrefab/Hierarchyだけ対象", requireAvatarDescriptor);
 
             if (targetMode == TargetMode.SelectedProjectFolderPrefabs)
@@ -170,12 +191,11 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 }
             }
 
-            var previewTargets = BuildTargets();
-            EditorGUILayout.LabelField("検出対象数", previewTargets.Count.ToString());
-            foreach (var t in previewTargets.Take(5))
-                EditorGUILayout.LabelField("- " + t.Label);
-            if (previewTargets.Count > 5)
-                EditorGUILayout.LabelField("...他 " + (previewTargets.Count - 5) + " 件");
+            if (targetMode == TargetMode.SelectedHierarchyAvatars)
+                DrawHierarchyAvatarSlots();
+
+            previewTargets = BuildTargets();
+            DrawDetectedTargets(previewTargets);
         }
 
         using (new EditorGUILayout.VerticalScope("box"))
@@ -213,14 +233,20 @@ public class AkiirayAvatarSetupTool : EditorWindow
             addKawaii8bitNoFoot = EditorGUILayout.ToggleLeft("可愛いポーズ(8bit・足の高さなし)（" + GetSimpleDependencyState(KawaiiComponentTypeName) + "）", addKawaii8bitNoFoot);
         }
 
-        if (GUILayout.Button("導入テスト（DryRun）", GUILayout.Height(36)))
+        bool hasTargets = previewTargets != null && previewTargets.Count > 0;
+        if (!hasTargets)
+            EditorGUILayout.HelpBox("導入対象のアバターが未選択です。ボタンの赤いアイコンは、実行対象がないため処理できない状態を示します。", MessageType.Warning);
+
+        if (DrawRunButton("導入テスト（DryRun）", hasTargets, 36))
         {
+            toolStatusChecked = true;
             detailedLog = Run(false, false);
             log = BuildConciseLog(detailedLog);
         }
 
-        if (GUILayout.Button("導入実行", GUILayout.Height(36)))
+        if (DrawRunButton("導入実行", hasTargets, 36))
         {
+            toolStatusChecked = true;
             detailedLog = Run(true, false);
             log = BuildConciseLog(detailedLog);
         }
@@ -236,6 +262,16 @@ public class AkiirayAvatarSetupTool : EditorWindow
         EditorGUILayout.EndScrollView();
     }
 
+    private bool DrawRunButton(string label, bool hasTargets, int height)
+    {
+        if (hasTargets)
+            return GUILayout.Button(label, GUILayout.Height(height));
+
+        var errorIcon = EditorGUIUtility.IconContent("console.erroricon").image;
+        var content = new GUIContent(" " + label, errorIcon, "導入対象のアバターが未選択です");
+        return GUILayout.Button(content, GUILayout.Height(height));
+    }
+
     private void DrawDependencyOverview()
     {
         EditorGUILayout.LabelField("AAO", GetSimpleDependencyState(AAOTypeName));
@@ -246,25 +282,126 @@ public class AkiirayAvatarSetupTool : EditorWindow
         EditorGUILayout.LabelField("可愛いポーズ", GetSimpleDependencyState(KawaiiComponentTypeName));
     }
 
+    private void DrawTargetModePopup()
+    {
+        targetMode = (TargetMode)EditorGUILayout.Popup(new GUIContent("対象モード"), (int)targetMode, TargetModeLabels);
+    }
+
+    private void DrawHierarchyAvatarSlots()
+    {
+        if (hierarchyAvatarSlots.Count == 0)
+            hierarchyAvatarSlots.Add(null);
+
+        EditorGUILayout.Space(4);
+        EditorGUILayout.LabelField("検出対象（Hierarchyのアバター）", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox("枠にHierarchy上のアバター、またはその子オブジェクトを入れてください。VRCAvatarDescriptorが見つかる親アバターを導入対象として扱います。", MessageType.Info);
+
+        for (int i = 0; i < hierarchyAvatarSlots.Count; i++)
+        {
+            using (new EditorGUILayout.HorizontalScope("box"))
+            {
+                EditorGUILayout.LabelField((i + 1) + "体目", EditorStyles.boldLabel, GUILayout.Width(48));
+                hierarchyAvatarSlots[i] = (GameObject)EditorGUILayout.ObjectField(hierarchyAvatarSlots[i], typeof(GameObject), true);
+
+                using (new EditorGUI.DisabledScope(hierarchyAvatarSlots.Count <= 1))
+                {
+                    if (GUILayout.Button("−", GUILayout.Width(28)))
+                    {
+                        hierarchyAvatarSlots.RemoveAt(i);
+                        GUI.FocusControl(null);
+                        break;
+                    }
+                }
+            }
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("＋ 対象枠を追加"))
+                hierarchyAvatarSlots.Add(null);
+            if (GUILayout.Button("選択中のHierarchyを追加"))
+                AddSelectedHierarchyAvatarsToSlots();
+        }
+    }
+
+    private void DrawDetectedTargets(List<SetupTarget> previewTargets)
+    {
+        EditorGUILayout.Space(4);
+        EditorGUILayout.LabelField("検出された導入対象", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("対象数", previewTargets.Count.ToString());
+
+        if (previewTargets.Count == 0)
+        {
+            EditorGUILayout.HelpBox("導入対象はまだ検出されていません。対象モードに合わせてHierarchyのアバター、ProjectのPrefab、またはProjectフォルダを選択してください。", MessageType.Warning);
+            return;
+        }
+
+        foreach (var t in previewTargets.Take(5))
+            EditorGUILayout.LabelField("● " + t.Label);
+        if (previewTargets.Count > 5)
+            EditorGUILayout.LabelField("...他 " + (previewTargets.Count - 5) + " 件");
+    }
+
+    private void InitializeHierarchySlotsFromSelectionIfNeeded()
+    {
+        if (hierarchyAvatarSlots.Count > 0)
+            return;
+
+        AddSelectedHierarchyAvatarsToSlots();
+        if (hierarchyAvatarSlots.Count == 0)
+            hierarchyAvatarSlots.Add(null);
+    }
+
+    private void AddSelectedHierarchyAvatarsToSlots()
+    {
+        var selectedRoots = Selection.gameObjects
+            .Where(x => x != null && !EditorUtility.IsPersistent(x))
+            .Select(FindAvatarRootFlexible)
+            .Where(x => x != null)
+            .Distinct()
+            .ToArray();
+
+        foreach (var root in selectedRoots)
+        {
+            if (hierarchyAvatarSlots.Contains(root))
+                continue;
+
+            var emptyIndex = hierarchyAvatarSlots.FindIndex(x => x == null);
+            if (emptyIndex >= 0)
+                hierarchyAvatarSlots[emptyIndex] = root;
+            else
+                hierarchyAvatarSlots.Add(root);
+        }
+    }
+
     private string GetSimpleDependencyState(string typeName)
     {
-        return FindType(typeName) != null ? "導入済" : "未導入/未判定";
+        return FormatToolStatus(FindType(typeName) != null);
     }
 
     private string GetPrefabDependencyState(string[] prefabNames)
     {
-        return FindPrefabByNames(prefabNames) != null ? "導入済" : "未導入/未判定";
+        return FormatToolStatus(FindPrefabByNames(prefabNames) != null);
+    }
+
+    private string FormatToolStatus(bool installed)
+    {
+        if (!toolStatusChecked)
+            return "未判定";
+        return installed ? "○ 導入済／判定済" : "× 未導入／判定済";
     }
 
     private string GetLightLimitChangerDependencyState()
     {
+        if (!toolStatusChecked)
+            return "未判定";
         if (FindLightLimitChangerV2SetupMethod() != null)
-            return "導入済（V2）";
+            return "○ 導入済／判定済（V2）";
         if (FindLightLimitChangerV1ApplyMethod() != null)
-            return "導入済（V1）";
+            return "○ 導入済／判定済（V1）";
         if (FindPrefabByNames(LLCPrefabNames) != null)
-            return "導入済（Prefabのみ/未判定）";
-        return "未導入/未判定";
+            return "○ 導入済／判定済（Prefabのみ）";
+        return "× 未導入／判定済";
     }
 
     private string BuildConciseLog(string detail)
@@ -289,7 +426,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 sb.AppendLine();
                 sb.AppendLine("対象: " + line.Substring(11));
             }
-            else if (line.Contains("[OK]") || line.Contains("[SKIP]") || line.Contains("[DRY]") || line.Contains("[WARN]") || line.Contains("[ERROR]"))
+            else if (line.Contains("[OK]") || line.Contains("[SKIP]") || line.Contains("[DRY]") || line.Contains("[INFO]") || line.Contains("[WARN]") || line.Contains("[ERROR]"))
             {
                 sb.AppendLine(ToJapaneseResultLine(line));
             }
@@ -337,6 +474,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return line.Replace("[OK]", "[成功]")
             .Replace("[SKIP]", "[スキップ]")
             .Replace("[DRY]", "[テスト]")
+            .Replace("[INFO]", "[情報]")
             .Replace("[WARN]", "[注意]")
             .Replace("[ERROR]", "[エラー]")
             .Replace("Already installed on avatar root", "アバター直下に既に導入済み")
@@ -349,7 +487,9 @@ public class AkiirayAvatarSetupTool : EditorWindow
             .Replace("Added prefab fallback", "Prefabフォールバックで追加しました")
             .Replace("Called", "呼び出しました")
             .Replace("Call", "呼び出し予定")
-            .Replace("Saved prefab", "Prefabを保存しました");
+            .Replace("Saved prefab", "Prefabを保存しました")
+            .Replace("DryRun can add it normally", "DryRunでは正常に追加できそうです")
+            .Replace("Not installed on avatar", "アバターに未導入");
     }
 
     private void SelectAllInstallOptions()
@@ -495,13 +635,13 @@ public class AkiirayAvatarSetupTool : EditorWindow
         try
         {
             sb.AppendLine("-- Actions --");
-            if (addAAO) InstallComponent(sb, avatarRoot, "AAO", AAOTypeName, apply, null);
-            if (addLAC) InstallLac(sb, avatarRoot, apply);
-            if (addRBS) InstallPrefabByName(sb, avatarRoot, "RBS", new[] { "RBS_Suimin(日本語)", "RBS_Suimin" }, apply);
-            if (addNadeSystem) InstallPrefabByName(sb, avatarRoot, "赤夜式 撫で音", new[] { "NadeSystem" }, apply);
-            if (addLightLimitChanger) InstallLightLimitChangerOfficial(sb, avatarRoot, apply);
-            if (addKawaiiNormal) InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ", apply);
-            if (addKawaii8bitNoFoot) InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", apply);
+            RunInstallOrSkip(sb, avatarRoot, "AAO", addAAO, IsTypeAvailable(AAOTypeName), () => InstallComponent(sb, avatarRoot, "AAO", AAOTypeName, apply, null));
+            RunInstallOrSkip(sb, avatarRoot, "LAC", addLAC, IsTypeAvailable(LACTypeName), () => InstallLac(sb, avatarRoot, apply));
+            RunInstallOrSkip(sb, avatarRoot, "RBS", addRBS, FindPrefabByNames(new[] { "RBS_Suimin(日本語)", "RBS_Suimin" }) != null, () => InstallPrefabByName(sb, avatarRoot, "RBS", new[] { "RBS_Suimin(日本語)", "RBS_Suimin" }, apply));
+            RunInstallOrSkip(sb, avatarRoot, "赤夜式 撫で音", addNadeSystem, IsTypeAvailable(NadeSettingsTypeName) || FindPrefabByNames(new[] { "NadeSystem" }) != null, () => InstallPrefabByName(sb, avatarRoot, "赤夜式 撫で音", new[] { "NadeSystem" }, apply));
+            RunInstallOrSkip(sb, avatarRoot, "LightLimitChanger", addLightLimitChanger, IsLightLimitChangerToolAvailable(), () => InstallLightLimitChangerOfficial(sb, avatarRoot, apply));
+            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ", addKawaiiNormal, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ", apply));
+            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", apply));
 
             if (apply)
             {
@@ -527,13 +667,39 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AppendInstallStatus(sb, avatarRoot);
     }
 
+    private void RunInstallOrSkip(StringBuilder sb, GameObject avatarRoot, string label, bool selected, bool toolAvailable, Action installAction)
+    {
+        if (!selected)
+        {
+            sb.AppendLine(label + ": [SKIP] 導入せず（" + (toolAvailable ? "未選択" : "ツールなし") + "）");
+            return;
+        }
+
+        installAction();
+    }
+
+    private bool IsTypeAvailable(string typeName)
+    {
+        return FindType(typeName) != null;
+    }
+
+    private bool IsLightLimitChangerToolAvailable()
+    {
+        return FindLightLimitChangerV2SetupMethod() != null
+            || FindLightLimitChangerV1ApplyMethod() != null
+            || FindPrefabByNames(LLCPrefabNames) != null;
+    }
+
     private List<SetupTarget> BuildTargets()
     {
         var list = new List<SetupTarget>();
 
         if (targetMode == TargetMode.SelectedHierarchyAvatars)
         {
-            foreach (var go in Selection.gameObjects.Where(x => x != null && !EditorUtility.IsPersistent(x)).Distinct())
+            if (hierarchyAvatarSlots.Count == 0)
+                hierarchyAvatarSlots.Add(null);
+
+            foreach (var go in hierarchyAvatarSlots.Where(x => x != null && !EditorUtility.IsPersistent(x)).Distinct())
             {
                 var avatarRoot = FindAvatarRootFlexible(go);
                 if (requireAvatarDescriptor && avatarRoot == null) continue;
@@ -866,6 +1032,9 @@ public class AkiirayAvatarSetupTool : EditorWindow
             sb.AppendLine("LightLimitChanger: [SKIP] Already installed");
             return;
         }
+
+        if (!apply && IsLightLimitChangerToolAvailable())
+            sb.AppendLine("LightLimitChanger: [INFO] Not installed on avatar / DryRun can add it normally");
 
         var setupMethod = FindLightLimitChangerV2SetupMethod();
         if (setupMethod != null)
