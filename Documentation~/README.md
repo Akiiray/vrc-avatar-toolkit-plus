@@ -11,7 +11,7 @@ Avatar Setup Window の対象モード:
 - AllProjectPrefabs: Project内すべてのPrefabに実行
 
 Project Prefabに適用する場合は PrefabUtility.LoadPrefabContents / SaveAsPrefabAsset で保存します。
-LightLimitChanger はV2の公式導入メソッドをReflectionで呼び出し、V1はLight Limit Changer Prefab検索による追加にフォールバックします。
+LightLimitChanger はV2の公式導入メソッドをReflectionで呼び出し、見つからない場合はV1の ApplytoAvatar(MenuCommand)、最後にLight Limit Changer Prefab検索による追加へフォールバックします。
 可愛いポーズは公式導入メソッドをReflectionで呼び出します。
 RBS と 赤夜式撫で音は現時点ではPrefab名検索による追加です。
 
