@@ -107,6 +107,8 @@ public class AvatarDebugReporter : EditorWindow
         {
             "io.github.azukimochi.LightLimitChangerComponent",
             "io.github.azukimochi.LightLimitChangerSettings",
+            "io.github.azukimochi.LightLimitChangerContextMenu",
+            "io.github.azukimochi.LightLimitChanger",
         });
 
         AppendTypeStatus(sb, "可愛いポーズツール", new[]
@@ -133,6 +135,7 @@ public class AvatarDebugReporter : EditorWindow
 
         sb.AppendLine("============================================================");
         sb.AppendLine("## LightLimitChanger Detail");
+        AppendLightLimitChangerVariant(sb);
         AppendComponentPathList(sb, avatarRoot, "io.github.azukimochi.LightLimitChangerComponent");
         AppendComponentPathList(sb, avatarRoot, "io.github.azukimochi.LightLimitChangerSettings");
         AppendPrefabNameInstalled(sb, "LightLimitChanger Prefab", avatarRoot, new[] { "Light Limit Changer", "LightLimitChanger" });
@@ -157,6 +160,28 @@ public class AvatarDebugReporter : EditorWindow
         AppendHierarchyComponentSummary(sb, avatarRoot);
 
         return sb.ToString();
+    }
+
+
+    private static void AppendLightLimitChangerVariant(StringBuilder sb)
+    {
+        var v2Component = FindType("io.github.azukimochi.LightLimitChangerComponent");
+        var v2ContextMenu = FindType("io.github.azukimochi.LightLimitChangerContextMenu");
+        var v1Settings = FindType("io.github.azukimochi.LightLimitChangerSettings");
+        var v1Installer = FindType("io.github.azukimochi.LightLimitChanger");
+
+        if (v2Component != null || v2ContextMenu != null)
+        {
+            sb.AppendLine("LightLimitChanger Variant: V2 detected");
+        }
+        else if (v1Settings != null || v1Installer != null)
+        {
+            sb.AppendLine("LightLimitChanger Variant: V1 detected");
+        }
+        else
+        {
+            sb.AppendLine("LightLimitChanger Variant: unknown / not detected");
+        }
     }
 
     private static void AppendInstalledSummary(StringBuilder sb, GameObject avatarRoot)
