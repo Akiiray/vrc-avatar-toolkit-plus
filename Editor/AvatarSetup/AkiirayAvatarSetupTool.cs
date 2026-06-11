@@ -43,12 +43,12 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private Vector2 scroll;
     private string log = "";
+    private string detailedLog = "";
 
     private TargetMode targetMode = TargetMode.SelectedHierarchyAvatars;
     private string selectedFolderPath = "";
     private bool requireAvatarDescriptor = true;
 
-    private bool dryRun = true;
     private bool addAAO = true;
     private bool addLAC = true;
     private LacPresetMode lacPreset = LacPresetMode.HighQuality;
@@ -66,7 +66,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private const string LLCV1SettingsTypeName = "io.github.azukimochi.LightLimitChangerSettings";
     private const string LLCV2ContextMenuTypeName = "io.github.azukimochi.LightLimitChangerContextMenu";
     private const string LLCV1InstallerTypeName = "io.github.azukimochi.LightLimitChanger";
-    private const string LLCContextMenuTypeName = "io.github.azukimochi.LightLimitChangerContextMenu";
+    private const string LLCInstalledObjectName = "Light Limit Changer";
     private static readonly string[] LLCInstalledTypeNames =
     {
         LLCV2ComponentTypeName,
@@ -74,8 +74,13 @@ public class AkiirayAvatarSetupTool : EditorWindow
     };
     private static readonly string[] LLCPrefabNames =
     {
-        "Light Limit Changer",
+        LLCInstalledObjectName,
         "LightLimitChanger",
+    };
+    private static readonly string[] LLCPrefabPaths =
+    {
+        "Packages/io.github.azukimochi.light-limit-changer/Light Limit Changer.prefab",
+        "Assets/LightLimitChanger/Light Limit Changer.prefab",
     };
     private const string KawaiiComponentTypeName = "jp.unisakistudio.kawaiiposing.KawaiiPosing";
     private const string PosingSystemMenuItemsTypeName = "jp.unisakistudio.posingsystemeditor.PosingSystemMenuItems";
@@ -137,6 +142,18 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
         using (new EditorGUILayout.VerticalScope("box"))
         {
+            EditorGUILayout.LabelField("ツール導入確認", EditorStyles.boldLabel);
+            DrawDependencyOverview();
+
+            if (GUILayout.Button("依存関係・導入状態チェック", GUILayout.Height(28)))
+            {
+                detailedLog = Run(false, true);
+                log = BuildConciseLog(detailedLog);
+            }
+        }
+
+        using (new EditorGUILayout.VerticalScope("box"))
+        {
             EditorGUILayout.LabelField("対象", EditorStyles.boldLabel);
             targetMode = (TargetMode)EditorGUILayout.EnumPopup("対象モード", targetMode);
             requireAvatarDescriptor = EditorGUILayout.ToggleLeft("VRCAvatarDescriptorがあるPrefab/Hierarchyだけ対象", requireAvatarDescriptor);
@@ -183,49 +200,156 @@ public class AkiirayAvatarSetupTool : EditorWindow
         using (new EditorGUILayout.VerticalScope("box"))
         {
             EditorGUILayout.LabelField("個別導入", EditorStyles.boldLabel);
-            dryRun = EditorGUILayout.ToggleLeft("Dry Run（実際には追加しない）", dryRun);
-            addAAO = EditorGUILayout.ToggleLeft("AAO / TraceAndOptimize", addAAO);
-            addLAC = EditorGUILayout.ToggleLeft("LAC / TextureCompressor", addLAC);
+            addAAO = EditorGUILayout.ToggleLeft("AAO / TraceAndOptimize（" + GetSimpleDependencyState(AAOTypeName) + "）", addAAO);
+            addLAC = EditorGUILayout.ToggleLeft("LAC / TextureCompressor（" + GetSimpleDependencyState(LACTypeName) + "）", addLAC);
             using (new EditorGUI.DisabledScope(!addLAC))
             {
                 lacPreset = (LacPresetMode)EditorGUILayout.EnumPopup("LAC Preset", lacPreset);
             }
-            addRBS = EditorGUILayout.ToggleLeft("RBS 睡眠システム Ver2", addRBS);
-            addNadeSystem = EditorGUILayout.ToggleLeft("赤夜式 撫で音ギミック", addNadeSystem);
-            addLightLimitChanger = EditorGUILayout.ToggleLeft("LightLimitChanger（V2公式Setup / V1 Prefab）", addLightLimitChanger);
-            addKawaiiNormal = EditorGUILayout.ToggleLeft("可愛いポーズ", addKawaiiNormal);
-            addKawaii8bitNoFoot = EditorGUILayout.ToggleLeft("可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot);
+            addRBS = EditorGUILayout.ToggleLeft("RBS 睡眠システム Ver2（" + GetPrefabDependencyState(new[] { "RBS_Suimin(日本語)", "RBS_Suimin" }) + "）", addRBS);
+            addNadeSystem = EditorGUILayout.ToggleLeft("赤夜式 撫で音ギミック（" + GetSimpleDependencyState(NadeSettingsTypeName) + "）", addNadeSystem);
+            addLightLimitChanger = EditorGUILayout.ToggleLeft("LightLimitChanger（" + GetLightLimitChangerDependencyState() + "）", addLightLimitChanger);
+            addKawaiiNormal = EditorGUILayout.ToggleLeft("可愛いポーズ（" + GetSimpleDependencyState(KawaiiComponentTypeName) + "）", addKawaiiNormal);
+            addKawaii8bitNoFoot = EditorGUILayout.ToggleLeft("可愛いポーズ(8bit・足の高さなし)（" + GetSimpleDependencyState(KawaiiComponentTypeName) + "）", addKawaii8bitNoFoot);
         }
 
-        using (new EditorGUILayout.HorizontalScope())
+        if (GUILayout.Button("導入テスト（DryRun）", GUILayout.Height(36)))
         {
-            if (GUILayout.Button("依存関係・導入状態チェック"))
-            {
-                log = Run(false, true);
-            }
-
-            if (GUILayout.Button(dryRun ? "Dry Run実行" : "導入実行"))
-            {
-                log = Run(!dryRun, false);
-            }
+            detailedLog = Run(false, false);
+            log = BuildConciseLog(detailedLog);
         }
 
-        using (new EditorGUILayout.HorizontalScope())
+        if (GUILayout.Button("導入実行", GUILayout.Height(36)))
         {
-            if (GUILayout.Button("ログをコピー"))
-            {
-                EditorGUIUtility.systemCopyBuffer = log;
-            }
-
-            if (GUILayout.Button("Consoleへ出力"))
-            {
-                Debug.Log(log);
-            }
+            detailedLog = Run(true, false);
+            log = BuildConciseLog(detailedLog);
         }
 
+        if (GUILayout.Button("詳細ログを表示", GUILayout.Height(36)))
+        {
+            AvatarSetupLogWindow.ShowLog(string.IsNullOrEmpty(detailedLog) ? log : detailedLog);
+        }
+
+        EditorGUILayout.LabelField("実行結果", EditorStyles.boldLabel);
         scroll = EditorGUILayout.BeginScrollView(scroll);
         EditorGUILayout.TextArea(log, GUILayout.ExpandHeight(true));
         EditorGUILayout.EndScrollView();
+    }
+
+    private void DrawDependencyOverview()
+    {
+        EditorGUILayout.LabelField("AAO", GetSimpleDependencyState(AAOTypeName));
+        EditorGUILayout.LabelField("LAC", GetSimpleDependencyState(LACTypeName));
+        EditorGUILayout.LabelField("RBS", GetPrefabDependencyState(new[] { "RBS_Suimin(日本語)", "RBS_Suimin" }));
+        EditorGUILayout.LabelField("赤夜式 撫で音", GetSimpleDependencyState(NadeSettingsTypeName));
+        EditorGUILayout.LabelField("LightLimitChanger", GetLightLimitChangerDependencyState());
+        EditorGUILayout.LabelField("可愛いポーズ", GetSimpleDependencyState(KawaiiComponentTypeName));
+    }
+
+    private string GetSimpleDependencyState(string typeName)
+    {
+        return FindType(typeName) != null ? "導入済" : "未導入/未判定";
+    }
+
+    private string GetPrefabDependencyState(string[] prefabNames)
+    {
+        return FindPrefabByNames(prefabNames) != null ? "導入済" : "未導入/未判定";
+    }
+
+    private string GetLightLimitChangerDependencyState()
+    {
+        if (FindLightLimitChangerV2SetupMethod() != null)
+            return "導入済（V2）";
+        if (FindLightLimitChangerV1ApplyMethod() != null)
+            return "導入済（V1）";
+        if (FindPrefabByNames(LLCPrefabNames) != null)
+            return "導入済（Prefabのみ/未判定）";
+        return "未導入/未判定";
+    }
+
+    private string BuildConciseLog(string detail)
+    {
+        if (string.IsNullOrEmpty(detail))
+            return "実行結果はまだありません。";
+
+        var sb = new StringBuilder();
+        foreach (var rawLine in detail.Split(new[] { '\n' }, StringSplitOptions.None))
+        {
+            var line = rawLine.TrimEnd('\r');
+            if (line.StartsWith("Mode: ", StringComparison.Ordinal))
+            {
+                sb.AppendLine("動作: " + ToJapaneseMode(line.Substring(6)));
+            }
+            else if (line.StartsWith("TargetCount: ", StringComparison.Ordinal))
+            {
+                sb.AppendLine("対象数: " + line.Substring(13));
+            }
+            else if (line.StartsWith("## Target: ", StringComparison.Ordinal))
+            {
+                sb.AppendLine();
+                sb.AppendLine("対象: " + line.Substring(11));
+            }
+            else if (line.Contains("[OK]") || line.Contains("[SKIP]") || line.Contains("[DRY]") || line.Contains("[WARN]") || line.Contains("[ERROR]"))
+            {
+                sb.AppendLine(ToJapaneseResultLine(line));
+            }
+            else if (line.StartsWith("LightLimitChanger Variant: ", StringComparison.Ordinal))
+            {
+                sb.AppendLine("LightLimitChanger判定: " + ToJapaneseLlcVariant(line.Substring(27)));
+            }
+            else if (line.Contains(": Installed") || line.Contains(": Not Installed") || line.Contains(": Type not found"))
+            {
+                sb.AppendLine(ToJapaneseStatusLine(line));
+            }
+        }
+
+        return sb.Length > 0 ? sb.ToString() : detail;
+    }
+
+    private string ToJapaneseMode(string mode)
+    {
+        if (mode == "Check Only") return "導入状態チェック";
+        if (mode == "Apply") return "導入実行";
+        if (mode == "Dry Run") return "導入テスト（DryRun）";
+        return mode;
+    }
+
+    private string ToJapaneseLlcVariant(string variant)
+    {
+        if (variant.StartsWith("V2 detected", StringComparison.Ordinal)) return "V2を検出";
+        if (variant.StartsWith("V1 detected", StringComparison.Ordinal)) return "V1を検出";
+        if (variant.StartsWith("unknown", StringComparison.Ordinal)) return "未判定";
+        return variant;
+    }
+
+    private string ToJapaneseStatusLine(string line)
+    {
+        return line.Replace("Not Installed", "未導入")
+            .Replace("Installed", "導入済")
+            .Replace("Type not found", "型が見つかりません")
+            .Replace("Count", "数")
+            .Replace("Component 数", "コンポーネント数")
+            .Replace("Name Hit 数", "名前一致数");
+    }
+
+    private string ToJapaneseResultLine(string line)
+    {
+        return line.Replace("[OK]", "[成功]")
+            .Replace("[SKIP]", "[スキップ]")
+            .Replace("[DRY]", "[テスト]")
+            .Replace("[WARN]", "[注意]")
+            .Replace("[ERROR]", "[エラー]")
+            .Replace("Already installed on avatar root", "アバター直下に既に導入済み")
+            .Replace("Already installed", "既に導入済み")
+            .Replace("Type not found", "型が見つかりません")
+            .Replace("Prefab not found", "Prefabが見つかりません")
+            .Replace("Add component", "コンポーネント追加")
+            .Replace("Added component", "コンポーネントを追加しました")
+            .Replace("Instantiate prefab", "Prefabを追加予定")
+            .Replace("Added prefab fallback", "Prefabフォールバックで追加しました")
+            .Replace("Called", "呼び出しました")
+            .Replace("Call", "呼び出し予定")
+            .Replace("Saved prefab", "Prefabを保存しました");
     }
 
     private void SelectAllInstallOptions()
@@ -468,7 +592,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AppendLightLimitChangerDependencyStatus(sb);
         AppendTypeLine(sb, "LightLimitChanger V2 Component", LLCV2ComponentTypeName);
         AppendTypeLine(sb, "LightLimitChanger V1 Settings", LLCV1SettingsTypeName);
-        AppendTypeLine(sb, "LightLimitChanger Official Setup", LLCContextMenuTypeName);
+        AppendTypeLine(sb, "LightLimitChanger V2 ContextMenu", LLCV2ContextMenuTypeName);
+        AppendTypeLine(sb, "LightLimitChanger V1 Installer", LLCV1InstallerTypeName);
         AppendPrefabCandidateLine(sb, "LightLimitChanger Prefab", LLCPrefabNames);
         AppendTypeLine(sb, "KawaiiPosing Component", KawaiiComponentTypeName);
         AppendTypeLine(sb, "PosingSystem Official AddPrefab", PosingSystemMenuItemsTypeName);
@@ -600,7 +725,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     {
         var comps = GetComponentsInChildrenByTypeNames(root, LLCInstalledTypeNames);
         var nameHits = root.GetComponentsInChildren<Transform>(true)
-            .Where(t => LLCPrefabNames.Contains(t.name))
+            .Where(t => t.name == LLCInstalledObjectName)
             .Distinct()
             .ToArray();
 
@@ -736,15 +861,13 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void InstallLightLimitChangerOfficial(StringBuilder sb, GameObject avatarRoot, bool apply)
     {
-        if (IsLightLimitChangerInstalled(avatarRoot))
+        if (HasLightLimitChanger(avatarRoot))
         {
             sb.AppendLine("LightLimitChanger: [SKIP] Already installed");
             return;
         }
 
         var setupMethod = FindLightLimitChangerV2SetupMethod();
-        var setupType = FindType(LLCContextMenuTypeName);
-        var setupMethod = setupType?.GetMethod("Setup", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
         if (setupMethod != null)
         {
             if (!apply)
@@ -753,9 +876,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 return;
             }
 
-            InvokeWithSelection(avatarRoot, () => setupMethod.Invoke(null, null));
-            sb.AppendLine("LightLimitChanger: [OK] Called official Setup() (V2 style)");
-            return;
+            if (TryInvokeLightLimitChangerSetup(sb, avatarRoot, setupMethod, null, "V2 Setup()"))
+                return;
         }
 
         var applyMethod = FindLightLimitChangerV1ApplyMethod();
@@ -767,12 +889,42 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 return;
             }
 
-            InvokeWithSelection(avatarRoot, () => applyMethod.Invoke(null, new object[] { new MenuCommand(avatarRoot) }));
-            sb.AppendLine("LightLimitChanger: [OK] Called ApplytoAvatar(MenuCommand) (V1 style)");
-            return;
+            if (TryInvokeLightLimitChangerSetup(sb, avatarRoot, applyMethod, new object[] { new MenuCommand(avatarRoot) }, "V1 ApplytoAvatar(MenuCommand)"))
+                return;
         }
 
         InstallLightLimitChangerPrefabFallback(sb, avatarRoot, apply);
+    }
+
+    private bool TryInvokeLightLimitChangerSetup(StringBuilder sb, GameObject avatarRoot, MethodInfo method, object[] parameters, string label)
+    {
+        try
+        {
+            InvokeWithSelection(avatarRoot, () => method.Invoke(null, parameters));
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine("LightLimitChanger: [WARN] " + label + " failed: " + GetInvocationErrorMessage(ex));
+            sb.AppendLine("LightLimitChanger: [INFO] Try next install method.");
+            return false;
+        }
+
+        if (HasLightLimitChanger(avatarRoot))
+        {
+            sb.AppendLine("LightLimitChanger: [OK] Called " + label);
+            return true;
+        }
+
+        sb.AppendLine("LightLimitChanger: [WARN] " + label + " completed but install marker was not detected on avatar.");
+        sb.AppendLine("LightLimitChanger: [INFO] Try next install method.");
+        return false;
+    }
+
+    private string GetInvocationErrorMessage(Exception ex)
+    {
+        if (ex is TargetInvocationException && ex.InnerException != null)
+            return ex.InnerException.GetType().Name + ": " + ex.InnerException.Message;
+        return ex.GetType().Name + ": " + ex.Message;
     }
 
     private MethodInfo FindLightLimitChangerV2SetupMethod()
@@ -784,16 +936,29 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private MethodInfo FindLightLimitChangerV1ApplyMethod()
     {
         var installerType = FindType(LLCV1InstallerTypeName);
-        return installerType?.GetMethod("ApplytoAvatar", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(MenuCommand) }, null);
+        if (installerType == null) return null;
+
+        return installerType.GetMethod("ApplytoAvatar", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(MenuCommand) }, null)
+            ?? installerType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "ApplytoAvatar"
+                    && m.GetParameters().Length == 1
+                    && m.GetParameters()[0].ParameterType.IsAssignableFrom(typeof(MenuCommand)));
     }
 
-    private bool IsLightLimitChangerInstalled(GameObject avatarRoot)
+    private static bool HasLightLimitChanger(GameObject avatarRoot)
     {
-        if (GetComponentsInChildrenByTypeNames(avatarRoot, LLCInstalledTypeNames).Count > 0)
-            return true;
+        foreach (var typeName in LLCInstalledTypeNames)
+        {
+            var type = FindType(typeName);
+            if (type == null) continue;
 
-        return avatarRoot.GetComponentsInChildren<Transform>(true)
-            .Any(t => LLCPrefabNames.Contains(t.name));
+            if (avatarRoot.GetComponentsInChildren(type, true).Length > 0)
+                return true;
+        }
+
+        return avatarRoot.transform
+            .GetComponentsInChildren<Transform>(true)
+            .Any(t => t.name == LLCInstalledObjectName);
     }
 
     private void InstallLightLimitChangerPrefabFallback(StringBuilder sb, GameObject avatarRoot, bool apply)
@@ -805,27 +970,6 @@ public class AkiirayAvatarSetupTool : EditorWindow
             return;
         }
 
-        InstallLightLimitChangerPrefabFallback(sb, avatarRoot, apply);
-    }
-
-    private bool IsLightLimitChangerInstalled(GameObject avatarRoot)
-    {
-        if (GetComponentsInChildrenByTypeNames(avatarRoot, LLCInstalledTypeNames).Count > 0)
-            return true;
-
-        return avatarRoot.GetComponentsInChildren<Transform>(true)
-            .Any(t => LLCPrefabNames.Contains(t.name));
-    }
-
-    private void InstallLightLimitChangerPrefabFallback(StringBuilder sb, GameObject avatarRoot, bool apply)
-    {
-        var prefab = FindPrefabByNames(LLCPrefabNames);
-        if (prefab == null)
-        {
-            sb.AppendLine("LightLimitChanger: [SKIP] Official Setup() not found and prefab not found. Tried: " + string.Join(", ", LLCPrefabNames));
-            return;
-        }
-
         if (!PrefabHasAnyComponentType(prefab, LLCInstalledTypeNames))
         {
             sb.AppendLine("LightLimitChanger: [WARN] Prefab found but known V1/V2 component types were not detected: " + AssetDatabase.GetAssetPath(prefab));
@@ -834,16 +978,6 @@ public class AkiirayAvatarSetupTool : EditorWindow
         if (!apply)
         {
             sb.AppendLine("LightLimitChanger: [DRY] Instantiate prefab " + AssetDatabase.GetAssetPath(prefab) + " under " + avatarRoot.name + " (V1 fallback)");
-            return;
-        }
-
-        var instanceObj = PrefabUtility.InstantiatePrefab(prefab, avatarRoot.transform) as GameObject;
-        if (instanceObj == null)
-        {
-            sb.AppendLine("LightLimitChanger: [ERROR] InstantiatePrefab returned null");
-            return;
-        }
-
             return;
         }
 
@@ -946,6 +1080,13 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private GameObject FindPrefabByNames(string[] names)
     {
+        foreach (var path in LLCPrefabPaths)
+        {
+            var explicitPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (explicitPrefab != null && names.Contains(explicitPrefab.name))
+                return explicitPrefab;
+        }
+
         foreach (var name in names)
         {
             var guids = AssetDatabase.FindAssets("t:prefab " + name);
@@ -1099,5 +1240,41 @@ public class AkiirayAvatarSetupTool : EditorWindow
             t = t.parent;
         }
         return string.Join("/", names);
+    }
+}
+
+
+public class AvatarSetupLogWindow : EditorWindow
+{
+    private Vector2 scroll;
+    private string log = "";
+
+    public static void ShowLog(string text)
+    {
+        var window = GetWindow<AvatarSetupLogWindow>("Avatar Setup 詳細ログ");
+        window.log = string.IsNullOrEmpty(text) ? "詳細ログはまだありません。" : text;
+        window.Focus();
+    }
+
+    private void OnGUI()
+    {
+        EditorGUILayout.LabelField("Avatar Setup 詳細ログ", EditorStyles.boldLabel);
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("ログをコピー"))
+            {
+                EditorGUIUtility.systemCopyBuffer = log;
+            }
+
+            if (GUILayout.Button("Consoleへ出力"))
+            {
+                Debug.Log(log);
+            }
+        }
+
+        scroll = EditorGUILayout.BeginScrollView(scroll);
+        EditorGUILayout.TextArea(log, GUILayout.ExpandHeight(true));
+        EditorGUILayout.EndScrollView();
     }
 }
