@@ -743,8 +743,6 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
 
         var setupMethod = FindLightLimitChangerV2SetupMethod();
-        var setupType = FindType(LLCContextMenuTypeName);
-        var setupMethod = setupType?.GetMethod("Setup", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
         if (setupMethod != null)
         {
             if (!apply)
@@ -753,9 +751,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 return;
             }
 
-            InvokeWithSelection(avatarRoot, () => setupMethod.Invoke(null, null));
-            sb.AppendLine("LightLimitChanger: [OK] Called official Setup() (V2 style)");
-            return;
+            if (TryInvokeLightLimitChangerSetup(sb, avatarRoot, setupMethod, null, "V2 Setup()"))
+                return;
         }
 
         var applyMethod = FindLightLimitChangerV1ApplyMethod();
@@ -767,12 +764,42 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 return;
             }
 
-            InvokeWithSelection(avatarRoot, () => applyMethod.Invoke(null, new object[] { new MenuCommand(avatarRoot) }));
-            sb.AppendLine("LightLimitChanger: [OK] Called ApplytoAvatar(MenuCommand) (V1 style)");
-            return;
+            if (TryInvokeLightLimitChangerSetup(sb, avatarRoot, applyMethod, new object[] { new MenuCommand(avatarRoot) }, "V1 ApplytoAvatar(MenuCommand)"))
+                return;
         }
 
         InstallLightLimitChangerPrefabFallback(sb, avatarRoot, apply);
+    }
+
+    private bool TryInvokeLightLimitChangerSetup(StringBuilder sb, GameObject avatarRoot, MethodInfo method, object[] parameters, string label)
+    {
+        try
+        {
+            InvokeWithSelection(avatarRoot, () => method.Invoke(null, parameters));
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine("LightLimitChanger: [WARN] " + label + " failed: " + GetInvocationErrorMessage(ex));
+            sb.AppendLine("LightLimitChanger: [INFO] Try next install method.");
+            return false;
+        }
+
+        if (IsLightLimitChangerInstalled(avatarRoot))
+        {
+            sb.AppendLine("LightLimitChanger: [OK] Called " + label);
+            return true;
+        }
+
+        sb.AppendLine("LightLimitChanger: [WARN] " + label + " completed but install marker was not detected on avatar.");
+        sb.AppendLine("LightLimitChanger: [INFO] Try next install method.");
+        return false;
+    }
+
+    private string GetInvocationErrorMessage(Exception ex)
+    {
+        if (ex is TargetInvocationException && ex.InnerException != null)
+            return ex.InnerException.GetType().Name + ": " + ex.InnerException.Message;
+        return ex.GetType().Name + ": " + ex.Message;
     }
 
     private MethodInfo FindLightLimitChangerV2SetupMethod()
@@ -805,27 +832,6 @@ public class AkiirayAvatarSetupTool : EditorWindow
             return;
         }
 
-        InstallLightLimitChangerPrefabFallback(sb, avatarRoot, apply);
-    }
-
-    private bool IsLightLimitChangerInstalled(GameObject avatarRoot)
-    {
-        if (GetComponentsInChildrenByTypeNames(avatarRoot, LLCInstalledTypeNames).Count > 0)
-            return true;
-
-        return avatarRoot.GetComponentsInChildren<Transform>(true)
-            .Any(t => LLCPrefabNames.Contains(t.name));
-    }
-
-    private void InstallLightLimitChangerPrefabFallback(StringBuilder sb, GameObject avatarRoot, bool apply)
-    {
-        var prefab = FindPrefabByNames(LLCPrefabNames);
-        if (prefab == null)
-        {
-            sb.AppendLine("LightLimitChanger: [SKIP] Official Setup() not found and prefab not found. Tried: " + string.Join(", ", LLCPrefabNames));
-            return;
-        }
-
         if (!PrefabHasAnyComponentType(prefab, LLCInstalledTypeNames))
         {
             sb.AppendLine("LightLimitChanger: [WARN] Prefab found but known V1/V2 component types were not detected: " + AssetDatabase.GetAssetPath(prefab));
@@ -834,16 +840,6 @@ public class AkiirayAvatarSetupTool : EditorWindow
         if (!apply)
         {
             sb.AppendLine("LightLimitChanger: [DRY] Instantiate prefab " + AssetDatabase.GetAssetPath(prefab) + " under " + avatarRoot.name + " (V1 fallback)");
-            return;
-        }
-
-        var instanceObj = PrefabUtility.InstantiatePrefab(prefab, avatarRoot.transform) as GameObject;
-        if (instanceObj == null)
-        {
-            sb.AppendLine("LightLimitChanger: [ERROR] InstantiatePrefab returned null");
-            return;
-        }
-
             return;
         }
 
