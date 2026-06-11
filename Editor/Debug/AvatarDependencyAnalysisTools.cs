@@ -23,6 +23,10 @@ namespace Akiiray.VRCAvatarToolkitPlus.Editor
         private const string WindowTitle = "VRC Avatar Toolkit Plus - 依存関係解析";
 
         private const string AvatarDescriptorFullName = "VRC.SDK3.Avatars.Components.VRCAvatarDescriptor";
+        private const string LLCV2ComponentTypeName = "io.github.azukimochi.LightLimitChangerComponent";
+        private const string LLCV1SettingsTypeName = "io.github.azukimochi.LightLimitChangerSettings";
+        private const string LLCV2ContextMenuTypeName = "io.github.azukimochi.LightLimitChangerContextMenu";
+        private const string LLCV1InstallerTypeName = "io.github.azukimochi.LightLimitChanger";
 
         private static readonly DependencyTypeDefinition[] ComponentDependencies =
         {
@@ -71,6 +75,22 @@ namespace Akiiray.VRCAvatarToolkitPlus.Editor
                     "nadena.dev.modular-avatar",
                     "modular-avatar",
                     "ModularAvatar"
+                }
+            ),
+
+            new DependencyTypeDefinition(
+                "LightLimitChanger",
+                new []
+                {
+                    "io.github.azukimochi.LightLimitChangerComponent",
+                    "io.github.azukimochi.LightLimitChangerSettings"
+                },
+                new []
+                {
+                    "io.github.azukimochi.light-limit-changer",
+                    "LightLimitChanger",
+                    "Light Limit Changer",
+                    "azukimochi"
                 }
             ),
 
@@ -138,6 +158,7 @@ namespace Akiiray.VRCAvatarToolkitPlus.Editor
 
             AppendProjectPackageHints(report);
             AppendComponentDependencyStatus(report);
+            AppendLightLimitChangerVariantStatus(report);
             AppendLacPresetStatus(report);
             AppendInstalledComponentStatus(report, avatarRoot);
             AppendInstalledPrefabLikeStatus(report, avatarRoot);
@@ -153,6 +174,7 @@ namespace Akiiray.VRCAvatarToolkitPlus.Editor
 
             AppendProjectPackageHints(report);
             AppendComponentDependencyStatus(report);
+            AppendLightLimitChangerVariantStatus(report);
             AppendLacPresetStatus(report);
             AppendPrefabCandidateStatus(report, quick: false);
             AppendAssemblySummary(report);
@@ -292,6 +314,41 @@ namespace Akiiray.VRCAvatarToolkitPlus.Editor
                 report.Line($"Status: {(anyFound ? "Detected" : "Not Detected")}");
                 report.Blank();
             }
+        }
+
+
+        private static void AppendLightLimitChangerVariantStatus(ReportBuilder report)
+        {
+            report.Section("LightLimitChanger Variant Status");
+
+            Type v2ComponentType = FindType(LLCV2ComponentTypeName);
+            Type v1SettingsType = FindType(LLCV1SettingsTypeName);
+            Type v2ContextMenuType = FindType(LLCV2ContextMenuTypeName);
+            Type v1InstallerType = FindType(LLCV1InstallerTypeName);
+            MethodInfo v2SetupMethod = v2ContextMenuType?.GetMethod("Setup", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+            MethodInfo v1ApplyMethod = v1InstallerType?.GetMethod("ApplytoAvatar", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(MenuCommand) }, null);
+
+            report.Line("V2 Component: " + FormatTypeStatus(v2ComponentType));
+            report.Line("V2 Setup(): " + (v2SetupMethod != null ? "OK" : "NG / Method not found"));
+            report.Line("V1 Settings: " + FormatTypeStatus(v1SettingsType));
+            report.Line("V1 ApplytoAvatar(MenuCommand): " + (v1ApplyMethod != null ? "OK" : "NG / Method not found"));
+
+            string variant;
+            if (v2ComponentType != null || v2SetupMethod != null)
+                variant = "V2 detected";
+            else if (v1SettingsType != null || v1ApplyMethod != null)
+                variant = "V1 detected";
+            else
+                variant = "unknown";
+
+            report.Line("Variant: " + variant);
+            report.Blank();
+        }
+
+        private static string FormatTypeStatus(Type type)
+        {
+            if (type == null) return "NG / Type not found";
+            return "OK / " + type.Assembly.GetName().Name;
         }
 
         private static void AppendLacPresetStatus(ReportBuilder report)

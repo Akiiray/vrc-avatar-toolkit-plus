@@ -106,6 +106,7 @@ public class AvatarDebugReporter : EditorWindow
         AppendTypeStatus(sb, "LightLimitChanger", new[]
         {
             "io.github.azukimochi.LightLimitChangerComponent",
+            "io.github.azukimochi.LightLimitChangerSettings",
         });
 
         AppendTypeStatus(sb, "可愛いポーズツール", new[]
@@ -133,6 +134,8 @@ public class AvatarDebugReporter : EditorWindow
         sb.AppendLine("============================================================");
         sb.AppendLine("## LightLimitChanger Detail");
         AppendComponentPathList(sb, avatarRoot, "io.github.azukimochi.LightLimitChangerComponent");
+        AppendComponentPathList(sb, avatarRoot, "io.github.azukimochi.LightLimitChangerSettings");
+        AppendPrefabNameInstalled(sb, "LightLimitChanger Prefab", avatarRoot, new[] { "Light Limit Changer", "LightLimitChanger" });
         sb.AppendLine();
 
         sb.AppendLine("============================================================");
@@ -161,7 +164,8 @@ public class AvatarDebugReporter : EditorWindow
         var aaoType = FindType("Anatawa12.AvatarOptimizer.TraceAndOptimize");
         var lacType = FindType("dev.limitex.avatar.compressor.TextureCompressor");
         var kawaiiType = FindType("jp.unisakistudio.kawaiiposing.KawaiiPosing");
-        var llcType = FindType("io.github.azukimochi.LightLimitChangerComponent");
+        var llcV2Type = FindType("io.github.azukimochi.LightLimitChangerComponent");
+        var llcV1Type = FindType("io.github.azukimochi.LightLimitChangerSettings");
         var nadeType = FindType("RedNightWorks.NadeSystem.NadeSystemSettings");
 
         AppendSimpleInstalled(sb, "AAO", avatarRoot, aaoType);
@@ -175,7 +179,9 @@ public class AvatarDebugReporter : EditorWindow
         });
 
         AppendSimpleInstalled(sb, "赤夜式 撫で音", avatarRoot, nadeType);
-        AppendSimpleInstalled(sb, "LightLimitChanger", avatarRoot, llcType);
+        AppendSimpleInstalled(sb, "LightLimitChanger V2 Component", avatarRoot, llcV2Type);
+        AppendSimpleInstalled(sb, "LightLimitChanger V1 Settings", avatarRoot, llcV1Type);
+        AppendPrefabNameInstalled(sb, "LightLimitChanger Prefab", avatarRoot, new[] { "Light Limit Changer", "LightLimitChanger" });
         AppendKawaiiInstalled(sb, avatarRoot, kawaiiType);
     }
 
