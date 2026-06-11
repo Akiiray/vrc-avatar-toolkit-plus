@@ -909,7 +909,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
             return false;
         }
 
-        if (HasLightLimitChanger(avatarRoot))
+        if (IsLightLimitChangerInstalled(avatarRoot))
         {
             sb.AppendLine("LightLimitChanger: [OK] Called " + label);
             return true;
@@ -948,23 +948,6 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private static bool HasLightLimitChanger(GameObject avatarRoot)
     {
         foreach (var typeName in LLCInstalledTypeNames)
-        {
-            var type = FindType(typeName);
-            if (type == null) continue;
-
-            if (avatarRoot.GetComponentsInChildren(type, true).Length > 0)
-                return true;
-        }
-
-        return avatarRoot.transform
-            .GetComponentsInChildren<Transform>(true)
-            .Any(t => t.name == LLCInstalledObjectName);
-    }
-
-    private void InstallLightLimitChangerPrefabFallback(StringBuilder sb, GameObject avatarRoot, bool apply)
-    {
-        var prefab = FindPrefabByNames(LLCPrefabNames);
-        if (prefab == null)
         {
             sb.AppendLine("LightLimitChanger: [SKIP] V2 Setup(), V1 ApplytoAvatar(MenuCommand), and prefab were not found. Tried prefabs: " + string.Join(", ", LLCPrefabNames));
             return;
