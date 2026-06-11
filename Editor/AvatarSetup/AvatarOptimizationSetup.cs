@@ -162,61 +162,61 @@ public static class AvatarOptimizationSetup
     // Tools menu: 選択フォルダ内のPrefabを処理
     // ------------------------------------------------------------
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch Window", false, 100)]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/レガシーウィンドウ", false, 100)]
     public static void OpenWindow()
     {
         AvatarOptimizationSetupWindow.ShowWindow();
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Add AAO Only")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Add AAO Only")]
     public static void Tools_AddAAOOnly()
     {
         RunForBestCurrentSelection(new RunOptions { AddAAO = true });
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Add LAC Only (HighQuality)")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Add LAC Only (HighQuality)")]
     public static void Tools_AddLACOnly_HighQuality()
     {
         RunForBestCurrentSelection(new RunOptions { AddLAC = true, LacPresetMode = LacPresetMode.HighQuality });
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Add LAC Only (Quality)")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Add LAC Only (Quality)")]
     public static void Tools_AddLACOnly_Quality()
     {
         RunForBestCurrentSelection(new RunOptions { AddLAC = true, LacPresetMode = LacPresetMode.Quality });
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Add RBS Suimin V2 Only")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Add RBS Suimin V2 Only")]
     public static void Tools_AddRBSOnly()
     {
         RunForBestCurrentSelection(new RunOptions { AddRBS = true });
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Add Nade System Only")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Add Nade System Only")]
     public static void Tools_AddNadeOnly()
     {
         RunForBestCurrentSelection(new RunOptions { AddNade = true });
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Setup AAO + LAC (HighQuality)")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Setup AAO + LAC (HighQuality)")]
     public static void Tools_SetupAAOAndLAC_HighQuality()
     {
         RunForBestCurrentSelection(new RunOptions { AddAAO = true, AddLAC = true, LacPresetMode = LacPresetMode.HighQuality });
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Setup AAO + LAC (Quality)")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Setup AAO + LAC (Quality)")]
     public static void Tools_SetupAAOAndLAC_Quality()
     {
         RunForBestCurrentSelection(new RunOptions { AddAAO = true, AddLAC = true, LacPresetMode = LacPresetMode.Quality });
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Setup AAO + LAC + RBS + Nade (HighQuality)")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Setup AAO + LAC + RBS + Nade (HighQuality)")]
     public static void Tools_SetupAll_HighQuality()
     {
         RunForBestCurrentSelection(new RunOptions { AddAAO = true, AddLAC = true, AddRBS = true, AddNade = true, LacPresetMode = LacPresetMode.HighQuality });
     }
 
-    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Legacy Batch/Setup AAO + LAC + RBS + Nade (Quality)")]
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/クイック導入/レガシー/Setup AAO + LAC + RBS + Nade (Quality)")]
     public static void Tools_SetupAll_Quality()
     {
         RunForBestCurrentSelection(new RunOptions { AddAAO = true, AddLAC = true, AddRBS = true, AddNade = true, LacPresetMode = LacPresetMode.Quality });
