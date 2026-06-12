@@ -58,7 +58,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool requireAvatarDescriptor = true;
     private bool toolStatusChecked = false;
     private string avatarInstallStatusTargetKey = "";
-    private readonly List<GameObject> hierarchyAvatarSlots = new List<GameObject>();
+    private List<GameObject> hierarchyAvatarSlots = new List<GameObject>();
 
     private bool addAAO = true;
     private bool addLAC = true;
@@ -100,8 +100,23 @@ public class AkiirayAvatarSetupTool : EditorWindow
     [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/導入ウィンドウ", false, 0)]
     public static void Open()
     {
+        ShowAvatarSetupWindow();
+    }
+
+    [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/Window", false, 1)]
+    public static void OpenWindowAlias()
+    {
+        ShowAvatarSetupWindow();
+    }
+
+    private static AkiirayAvatarSetupTool ShowAvatarSetupWindow()
+    {
         var window = GetWindow<AkiirayAvatarSetupTool>("VRC Avatar Toolkit Plus - Avatar Setup");
+        window.minSize = new Vector2(520, 620);
         window.InitializeHierarchySlotsFromSelectionIfNeeded();
+        window.Show();
+        window.Focus();
+        return window;
     }
 
     private void OnEnable()
@@ -142,7 +157,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         bool addKawaiiNormal = false,
         bool addKawaii8bitNoFoot = false)
     {
-        var window = GetWindow<AkiirayAvatarSetupTool>("VRC Avatar Toolkit Plus - Avatar Setup");
+        var window = ShowAvatarSetupWindow();
         window.addAAO = addAAO;
         window.addLAC = addLAC;
         window.addRBS = addRBS;
@@ -150,8 +165,6 @@ public class AkiirayAvatarSetupTool : EditorWindow
         window.addLightLimitChanger = addLightLimitChanger;
         window.addKawaiiNormal = addKawaiiNormal;
         window.addKawaii8bitNoFoot = addKawaii8bitNoFoot;
-        window.InitializeHierarchySlotsFromSelectionIfNeeded();
-        window.Focus();
     }
 
     private void OnGUI()
@@ -294,6 +307,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void DrawHierarchyAvatarSlots()
     {
+        EnsureHierarchyAvatarSlots();
         if (hierarchyAvatarSlots.Count == 0)
             hierarchyAvatarSlots.Add(null);
 
@@ -432,6 +446,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void InitializeHierarchySlotsFromSelectionIfNeeded()
     {
+        EnsureHierarchyAvatarSlots();
         if (hierarchyAvatarSlots.Count > 0)
             return;
 
@@ -440,8 +455,16 @@ public class AkiirayAvatarSetupTool : EditorWindow
             hierarchyAvatarSlots.Add(null);
     }
 
+    private void EnsureHierarchyAvatarSlots()
+    {
+        if (hierarchyAvatarSlots == null)
+            hierarchyAvatarSlots = new List<GameObject>();
+    }
+
     private void AddSelectedHierarchyAvatarsToSlots()
     {
+        EnsureHierarchyAvatarSlots();
+
         var selectedRoots = Selection.gameObjects
             .Where(x => x != null && !EditorUtility.IsPersistent(x))
             .Select(FindAvatarRootFlexible)
@@ -798,6 +821,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
         if (targetMode == TargetMode.SelectedHierarchyAvatars)
         {
+            EnsureHierarchyAvatarSlots();
             if (hierarchyAvatarSlots.Count == 0)
                 hierarchyAvatarSlots.Add(null);
 
