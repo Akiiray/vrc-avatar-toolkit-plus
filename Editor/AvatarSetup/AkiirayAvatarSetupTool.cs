@@ -96,6 +96,17 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private const string KawaiiComponentTypeName = "jp.unisakistudio.kawaiiposing.KawaiiPosing";
     private const string PosingSystemMenuItemsTypeName = "jp.unisakistudio.posingsystemeditor.PosingSystemMenuItems";
     private const string NadeSettingsTypeName = "RedNightWorks.NadeSystem.NadeSystemSettings";
+    private static readonly string[] RBSPrefabNames =
+    {
+        "RBS_Suimin(日本語)",
+        "RBS_Suimin",
+        "RBS_Suimin-Menu",
+        "RBS_Suimin-Menu-ja_JP",
+    };
+    private static readonly string[] RBSInstalledNameKeywords =
+    {
+        "RBS_Suimin",
+    };
 
     [MenuItem("Tools/VRC Avatar Toolkit Plus/Avatar Setup/導入ウィンドウ", false, 0)]
     public static void Open()
@@ -292,12 +303,12 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void DrawDependencyOverview()
     {
-        EditorGUILayout.LabelField("AAO", GetSimpleDependencyState(AAOTypeName));
-        EditorGUILayout.LabelField("LAC", GetSimpleDependencyState(LACTypeName));
-        EditorGUILayout.LabelField("RBS", GetPrefabDependencyState(new[] { "RBS_Suimin(日本語)", "RBS_Suimin" }));
-        EditorGUILayout.LabelField("赤夜式 撫で音", GetSimpleDependencyState(NadeSettingsTypeName));
+        EditorGUILayout.LabelField("AAO", GetTypeToolDependencyState(AAOTypeName));
+        EditorGUILayout.LabelField("LAC", GetTypeToolDependencyState(LACTypeName));
+        EditorGUILayout.LabelField("RBS", GetPrefabToolDependencyState(RBSPrefabNames));
+        EditorGUILayout.LabelField("赤夜式 撫で音", GetTypeToolDependencyState(NadeSettingsTypeName));
         EditorGUILayout.LabelField("LightLimitChanger", GetLightLimitChangerDependencyState());
-        EditorGUILayout.LabelField("可愛いポーズ", GetSimpleDependencyState(KawaiiComponentTypeName));
+        EditorGUILayout.LabelField("可愛いポーズ", GetTypeToolDependencyState(KawaiiComponentTypeName));
     }
 
     private void DrawTargetModePopup()
@@ -375,9 +386,9 @@ public class AkiirayAvatarSetupTool : EditorWindow
         EditorGUILayout.LabelField("選択アバターの導入状態", EditorStyles.boldLabel);
         EditorGUILayout.LabelField("AAO", GetAvatarComponentInstallState(avatarRoot, AAOTypeName));
         EditorGUILayout.LabelField("LAC", GetAvatarComponentInstallState(avatarRoot, LACTypeName));
-        EditorGUILayout.LabelField("RBS", FormatAvatarInstallStatus(HasRbsInstalled(avatarRoot)));
+        EditorGUILayout.LabelField("RBS", GetRbsAvatarInstallState(avatarRoot));
         EditorGUILayout.LabelField("赤夜式 撫で音", GetAvatarComponentInstallState(avatarRoot, NadeSettingsTypeName));
-        EditorGUILayout.LabelField("LightLimitChanger", FormatAvatarInstallStatus(HasLightLimitChanger(avatarRoot)));
+        EditorGUILayout.LabelField("LightLimitChanger", GetLightLimitChangerAvatarInstallState(avatarRoot));
         EditorGUILayout.LabelField("可愛いポーズ", GetAvatarKawaiiInstallState(avatarRoot, "可愛いポーズ"));
         EditorGUILayout.LabelField("可愛いポーズ(8bit・足の高さなし)", GetAvatarKawaiiInstallState(avatarRoot, "可愛いポーズ(8bit・足の高さなし)"));
         EditorGUILayout.Space(4);
@@ -414,7 +425,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     {
         var type = FindType(typeName);
         if (type == null)
-            return "型が見つかりません";
+            return FormatToolNotInstalledStatus();
 
         var count = avatarRoot.GetComponentsInChildren(type, true).Length;
         return FormatAvatarInstallStatus(count > 0) + " / 数: " + count;
@@ -424,7 +435,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     {
         var type = FindType(KawaiiComponentTypeName);
         if (type == null)
-            return "型が見つかりません";
+            return FormatToolNotInstalledStatus();
 
         var found = avatarRoot.GetComponentsInChildren(type, true)
             .OfType<Component>()
@@ -432,16 +443,38 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return FormatAvatarInstallStatus(found);
     }
 
+    private string GetRbsAvatarInstallState(GameObject avatarRoot)
+    {
+        if (!IsRbsToolAvailable())
+            return FormatToolNotInstalledStatus();
+
+        return FormatAvatarInstallStatus(HasRbsInstalled(avatarRoot));
+    }
+
+    private string GetLightLimitChangerAvatarInstallState(GameObject avatarRoot)
+    {
+        var variant = GetLightLimitChangerToolVariant();
+        if (variant == LightLimitChangerVariant.NotInstalled)
+            return FormatToolNotInstalledStatus();
+
+        return FormatAvatarInstallStatus(HasLightLimitChanger(avatarRoot)) + FormatLightLimitChangerVariantSuffix(variant);
+    }
+
     private string FormatAvatarInstallStatus(bool installed)
     {
         return installed ? "○ 導入済" : "× 未導入";
+    }
+
+    private string FormatToolNotInstalledStatus()
+    {
+        return "× ツール未導入";
     }
 
     private static bool HasRbsInstalled(GameObject avatarRoot)
     {
         if (avatarRoot == null) return false;
         return avatarRoot.GetComponentsInChildren<Transform>(true)
-            .Any(t => t.name == "RBS_Suimin" || t.name == "RBS_Suimin(日本語)" || t.name.Contains("RBS_Suimin-Menu"));
+            .Any(t => RBSPrefabNames.Contains(t.name) || RBSInstalledNameKeywords.Any(keyword => t.name.Contains(keyword)));
     }
 
     private void InitializeHierarchySlotsFromSelectionIfNeeded()
@@ -485,34 +518,33 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
     }
 
-    private string GetSimpleDependencyState(string typeName)
+    private string GetTypeToolDependencyState(string typeName)
     {
-        return FormatToolStatus(FindType(typeName) != null);
+        return FormatToolDependencyStatus(FindType(typeName) != null);
     }
 
-    private string GetPrefabDependencyState(string[] prefabNames)
+    private string GetPrefabToolDependencyState(string[] prefabNames)
     {
-        return FormatToolStatus(FindPrefabByNames(prefabNames) != null);
+        return FormatToolDependencyStatus(FindPrefabByNames(prefabNames) != null);
     }
 
-    private string FormatToolStatus(bool installed)
+    private string FormatToolDependencyStatus(bool installed)
     {
         if (!toolStatusChecked)
             return "未判定";
-        return installed ? "○ 導入済／判定済" : "× 未導入／判定済";
+        return installed ? "○ 導入済み" : FormatToolNotInstalledStatus();
     }
 
     private string GetLightLimitChangerDependencyState()
     {
         if (!toolStatusChecked)
             return "未判定";
-        if (FindLightLimitChangerV2SetupMethod() != null)
-            return "○ 導入済／判定済（V2）";
-        if (FindLightLimitChangerV1ApplyMethod() != null)
-            return "○ 導入済／判定済（V1）";
-        if (FindPrefabByNames(LLCPrefabNames) != null)
-            return "○ 導入済／判定済（Prefabのみ）";
-        return "× 未導入／判定済";
+
+        var variant = GetLightLimitChangerToolVariant();
+        if (variant == LightLimitChangerVariant.NotInstalled)
+            return FormatToolNotInstalledStatus();
+
+        return "○ 導入済み" + FormatLightLimitChangerVariantSuffix(variant);
     }
 
     private string BuildConciseLog(string detail)
@@ -545,7 +577,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
             {
                 sb.AppendLine("LightLimitChanger判定: " + ToJapaneseLlcVariant(line.Substring(27)));
             }
-            else if (line.Contains(": Installed") || line.Contains(": Not Installed") || line.Contains(": Type not found"))
+            else if (line.Contains(": Installed") || line.Contains(": Not Installed") || line.Contains(": Type not found") || line.Contains(": Tool not installed"))
             {
                 sb.AppendLine(ToJapaneseStatusLine(line));
             }
@@ -572,9 +604,10 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private string ToJapaneseStatusLine(string line)
     {
-        return line.Replace("Not Installed", "未導入")
+        return line.Replace("Tool not installed", "ツール未導入")
+            .Replace("Type not found", "ツール未導入")
+            .Replace("Not Installed", "未導入")
             .Replace("Installed", "導入済")
-            .Replace("Type not found", "型が見つかりません")
             .Replace("Count", "数")
             .Replace("Component 数", "コンポーネント数")
             .Replace("Name Hit 数", "名前一致数");
@@ -598,8 +631,9 @@ public class AkiirayAvatarSetupTool : EditorWindow
             .Replace("[ERROR]", "")
             .Replace("Already installed on avatar root", "アバター直下に既に導入済み")
             .Replace("Already installed", "既に導入済み")
-            .Replace("Type not found", "型が見つかりません")
+            .Replace("Type not found", "ツール未導入")
             .Replace("Prefab not found", "Prefabが見つかりません")
+            .Replace("Official AddPrefab(string) not found", "公式AddPrefab(string)が見つかりません")
             .Replace("Add component", "コンポーネント追加")
             .Replace("Added component", "コンポーネントを追加しました")
             .Replace("Instantiate prefab", "Prefabを追加予定")
@@ -762,8 +796,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
             sb.AppendLine("-- Actions --");
             RunInstallOrSkip(sb, avatarRoot, "AAO", addAAO, IsTypeAvailable(AAOTypeName), () => InstallComponent(sb, avatarRoot, "AAO", AAOTypeName, apply, null));
             RunInstallOrSkip(sb, avatarRoot, "LAC", addLAC, IsTypeAvailable(LACTypeName), () => InstallLac(sb, avatarRoot, apply));
-            RunInstallOrSkip(sb, avatarRoot, "RBS", addRBS, FindPrefabByNames(new[] { "RBS_Suimin(日本語)", "RBS_Suimin" }) != null, () => InstallPrefabByName(sb, avatarRoot, "RBS", new[] { "RBS_Suimin(日本語)", "RBS_Suimin" }, apply));
-            RunInstallOrSkip(sb, avatarRoot, "赤夜式 撫で音", addNadeSystem, IsTypeAvailable(NadeSettingsTypeName) || FindPrefabByNames(new[] { "NadeSystem" }) != null, () => InstallPrefabByName(sb, avatarRoot, "赤夜式 撫で音", new[] { "NadeSystem" }, apply));
+            RunInstallOrSkip(sb, avatarRoot, "RBS", addRBS, IsRbsToolAvailable(), () => InstallPrefabByName(sb, avatarRoot, "RBS", RBSPrefabNames, apply));
+            RunInstallOrSkip(sb, avatarRoot, "赤夜式 撫で音", addNadeSystem, IsTypeAvailable(NadeSettingsTypeName), () => InstallPrefabByName(sb, avatarRoot, "赤夜式 撫で音", new[] { "NadeSystem" }, apply));
             RunInstallOrSkip(sb, avatarRoot, "LightLimitChanger", addLightLimitChanger, IsLightLimitChangerToolAvailable(), () => InstallLightLimitChangerOfficial(sb, avatarRoot, apply));
             RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ", addKawaiiNormal, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ", apply));
             RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", apply));
@@ -794,9 +828,15 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void RunInstallOrSkip(StringBuilder sb, GameObject avatarRoot, string label, bool selected, bool toolAvailable, Action installAction)
     {
+        if (!toolAvailable)
+        {
+            sb.AppendLine(label + ": [SKIP] ツール未導入");
+            return;
+        }
+
         if (!selected)
         {
-            sb.AppendLine(label + ": [SKIP] 導入せず（" + (toolAvailable ? "未選択" : "ツールなし") + "）");
+            sb.AppendLine(label + ": [SKIP] 導入未選択");
             return;
         }
 
@@ -808,11 +848,41 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return FindType(typeName) != null;
     }
 
+    private enum LightLimitChangerVariant
+    {
+        NotInstalled,
+        V1,
+        V2,
+        PrefabOnly
+    }
+
+    private bool IsRbsToolAvailable()
+    {
+        return FindPrefabByNames(RBSPrefabNames) != null;
+    }
+
     private bool IsLightLimitChangerToolAvailable()
     {
-        return FindLightLimitChangerV2SetupMethod() != null
-            || FindLightLimitChangerV1ApplyMethod() != null
-            || FindPrefabByNames(LLCPrefabNames) != null;
+        return GetLightLimitChangerToolVariant() != LightLimitChangerVariant.NotInstalled;
+    }
+
+    private LightLimitChangerVariant GetLightLimitChangerToolVariant()
+    {
+        if (FindType(LLCV2ComponentTypeName) != null)
+            return LightLimitChangerVariant.V2;
+        if (FindType(LLCV1SettingsTypeName) != null)
+            return LightLimitChangerVariant.V1;
+        if (FindPrefabByNames(LLCPrefabNames) != null)
+            return LightLimitChangerVariant.PrefabOnly;
+        return LightLimitChangerVariant.NotInstalled;
+    }
+
+    private string FormatLightLimitChangerVariantSuffix(LightLimitChangerVariant variant)
+    {
+        if (variant == LightLimitChangerVariant.V2) return "（V2）";
+        if (variant == LightLimitChangerVariant.V1) return "（V1）";
+        if (variant == LightLimitChangerVariant.PrefabOnly) return "（Prefabのみ）";
+        return "";
     }
 
     private List<SetupTarget> BuildTargets()
@@ -881,6 +951,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AppendTypeLine(sb, "AAO", AAOTypeName);
         AppendTypeLine(sb, "LAC", LACTypeName);
         AppendTypeLine(sb, "LAC Preset Enum", LACPresetEnumTypeName);
+        AppendPrefabCandidateLine(sb, "RBS Prefab", RBSPrefabNames);
         AppendLightLimitChangerDependencyStatus(sb);
         AppendTypeLine(sb, "LightLimitChanger V2 Component", LLCV2ComponentTypeName);
         AppendTypeLine(sb, "LightLimitChanger V1 Settings", LLCV1SettingsTypeName);
@@ -903,7 +974,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private void AppendTypeLine(StringBuilder sb, string label, string typeName)
     {
         var type = FindType(typeName);
-        sb.AppendLine(label + ": " + (type != null ? "OK / " + type.Assembly.GetName().Name : "NG / Type not found"));
+        sb.AppendLine(label + ": " + (type != null ? "OK / " + type.Assembly.GetName().Name : "NG / Tool not installed"));
     }
 
     private void AppendLightLimitChangerDependencyStatus(StringBuilder sb)
@@ -925,9 +996,9 @@ public class AkiirayAvatarSetupTool : EditorWindow
         sb.AppendLine("LightLimitChanger Prefab: " + (prefab != null ? "OK / " + AssetDatabase.GetAssetPath(prefab) : "NG / Prefab not found"));
 
         string variant;
-        if (v2ComponentType != null || v2SetupMethod != null)
+        if (v2ComponentType != null)
             variant = "V2 detected";
-        else if (v1SettingsType != null || v1ApplyMethod != null)
+        else if (v1SettingsType != null)
             variant = "V1 detected";
         else if (prefab != null)
             variant = "unknown / prefab fallback only";
@@ -938,7 +1009,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void AppendResolvedTypeLine(StringBuilder sb, string label, Type type)
     {
-        sb.AppendLine(label + ": " + (type != null ? "OK / " + type.Assembly.GetName().Name : "NG / Type not found"));
+        sb.AppendLine(label + ": " + (type != null ? "OK / " + type.Assembly.GetName().Name : "NG / Tool not installed"));
     }
 
     private void AppendPackageVersion(StringBuilder sb, string packageName)
@@ -968,7 +1039,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         var type = FindType(typeName);
         if (type == null)
         {
-            sb.AppendLine(label + ": Type not found");
+            sb.AppendLine(label + ": Tool not installed");
             return;
         }
 
@@ -983,7 +1054,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         var type = FindType(LACTypeName);
         if (type == null)
         {
-            sb.AppendLine("LAC: Type not found");
+            sb.AppendLine("LAC: Tool not installed");
             return;
         }
 
@@ -1004,7 +1075,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private void AppendRbsStatus(StringBuilder sb, GameObject root)
     {
         var hits = root.GetComponentsInChildren<Transform>(true)
-            .Where(t => t.name == "RBS_Suimin" || t.name == "RBS_Suimin(日本語)" || t.name.Contains("RBS_Suimin-Menu"))
+            .Where(t => RBSPrefabNames.Contains(t.name) || RBSInstalledNameKeywords.Any(keyword => t.name.Contains(keyword)))
             .Distinct()
             .ToArray();
 
@@ -1047,7 +1118,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         var type = FindType(KawaiiComponentTypeName);
         if (type == null)
         {
-            sb.AppendLine("可愛いポーズツール: Type not found");
+            sb.AppendLine("可愛いポーズツール: Tool not installed");
             return;
         }
 
@@ -1067,7 +1138,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         var type = FindType(typeName);
         if (type == null)
         {
-            sb.AppendLine(label + ": [SKIP] Type not found: " + typeName);
+            sb.AppendLine(label + ": [SKIP] ツール未導入");
             return;
         }
 
@@ -1096,7 +1167,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         var type = FindType(LACTypeName);
         if (type == null)
         {
-            sb.AppendLine("LAC: [SKIP] Type not found: " + LACTypeName);
+            sb.AppendLine("LAC: [SKIP] ツール未導入");
             return;
         }
 
