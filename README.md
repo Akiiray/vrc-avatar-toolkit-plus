@@ -1,5 +1,23 @@
 # VRC Avatar Toolkit Plus
 
+## VCC / ALCOM への追加
+
+VCC / ALCOM から利用する場合は、以下の VPM リポジトリを追加してください。
+
+リポジトリ追加ページ:
+
+https://akiiray.github.io/vpm-repository/addrepos.html
+
+手動追加用 URL:
+
+https://akiiray.github.io/vpm-repository/index.json
+
+VPM リポジトリ本体:
+
+https://github.com/Akiiray/vpm-repository
+
+---
+
 VRC Avatar Toolkit Plus は、VRChat アバター制作・改変作業を効率化するための Unity Editor 拡張ツール集です。
 
 アバターへの便利ツールの導入支援、一括セットアップ、マテリアル管理、デバッグ、依存関係解析、VRC Dynamics の保守など、日常的な改変作業をサポートします。
