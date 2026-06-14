@@ -50,8 +50,10 @@ public class AkiirayAvatarSetupTool : EditorWindow
     }
 
     private Vector2 scroll;
+    private Vector2 dryRunSummaryScroll;
     private string log = "";
     private string detailedLog = "";
+    private readonly List<string> lastDryRunSummary = new List<string>();
 
     private TargetMode targetMode = TargetMode.SelectedHierarchyAvatars;
     private string selectedFolderPath = "";
@@ -181,26 +183,20 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private void OnGUI()
     {
         EditorGUILayout.LabelField("VRC Avatar Toolkit Plus - Avatar Setup", EditorStyles.boldLabel);
-        List<SetupTarget> previewTargets = null;
+
+        var previewTargets = DrawTargetArea();
+        DrawDependencyStatusCards();
+        DrawInstallOptionsAndDryRun(previewTargets);
+        DrawDetailedLog();
+    }
+
+    private List<SetupTarget> DrawTargetArea()
+    {
+        List<SetupTarget> previewTargets;
 
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            EditorGUILayout.LabelField("ツール導入状態", EditorStyles.boldLabel);
-            if (!toolStatusChecked)
-                EditorGUILayout.HelpBox("最初に導入状態チェックを実行すると、各ツールが導入済みか未導入かを判定して表示します。", MessageType.Info);
-            DrawDependencyOverview();
-
-            if (GUILayout.Button("導入状態チェック", GUILayout.Height(28)))
-            {
-                toolStatusChecked = true;
-                detailedLog = Run(false, true);
-                log = BuildConciseLog(detailedLog);
-            }
-        }
-
-        using (new EditorGUILayout.VerticalScope("box"))
-        {
-            EditorGUILayout.LabelField("対象", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("対象選択・操作", EditorStyles.boldLabel);
             DrawTargetModePopup();
             requireAvatarDescriptor = EditorGUILayout.ToggleLeft("VRCAvatarDescriptorがあるPrefab/Hierarchyだけ対象", requireAvatarDescriptor);
 
@@ -221,74 +217,187 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
             previewTargets = BuildTargets();
             DrawDetectedTargets(previewTargets);
-        }
-
-        using (new EditorGUILayout.VerticalScope("box"))
-        {
-            EditorGUILayout.LabelField("導入プリセット", EditorStyles.boldLabel);
-            allInstallKawaiiMode = (KawaiiPoseInstallMode)EditorGUILayout.EnumPopup("すべて導入時の可愛いポーズ", allInstallKawaiiMode);
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("すべて導入を選択"))
+                if (GUILayout.Button("導入状態チェック", GUILayout.Height(28)))
                 {
-                    SelectAllInstallOptions();
+                    toolStatusChecked = true;
+                    detailedLog = Run(false, true);
+                    log = BuildConciseLog(detailedLog);
                 }
 
-                if (GUILayout.Button("すべて解除"))
-                {
+                if (GUILayout.Button("すべて導入を選択", GUILayout.Height(28)))
+                    SelectAllInstallOptions();
+
+                if (GUILayout.Button("すべて解除", GUILayout.Height(28)))
                     ClearInstallOptions();
-                }
             }
         }
 
+        return previewTargets;
+    }
+
+    private void DrawDependencyStatusCards()
+    {
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            EditorGUILayout.LabelField("個別導入", EditorStyles.boldLabel);
-            DrawSingleAvatarInstallStatus(previewTargets);
+            EditorGUILayout.LabelField("ツール導入状態", EditorStyles.boldLabel);
+            if (!toolStatusChecked)
+                EditorGUILayout.HelpBox("導入状態チェックを実行すると、各ツールの導入状態をカードに表示します。", MessageType.Info);
 
-            addAAO = EditorGUILayout.ToggleLeft("AAO / TraceAndOptimize", addAAO);
-            addLAC = EditorGUILayout.ToggleLeft("LAC / TextureCompressor", addLAC);
-            using (new EditorGUI.DisabledScope(!addLAC))
+            var cards = new[]
             {
-                lacPreset = (LacPresetMode)EditorGUILayout.EnumPopup("LAC Preset", lacPreset);
+                new { Name = "AAO", Status = GetTypeToolDependencyState(AAOTypeName) },
+                new { Name = "LAC", Status = GetTypeToolDependencyState(LACTypeName) },
+                new { Name = "RBS", Status = GetPrefabToolDependencyState(RBSPrefabNames) },
+                new { Name = "赤夜式 撫で音", Status = GetTypeToolDependencyState(NadeSettingsTypeName) },
+                new { Name = "LightLimitChanger", Status = GetLightLimitChangerDependencyState() },
+                new { Name = "可愛いポーズ", Status = GetTypeToolDependencyState(KawaiiComponentTypeName) },
+            };
+
+            int columns = position.width >= 760f ? 3 : 2;
+            for (int i = 0; i < cards.Length; i += columns)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    for (int c = 0; c < columns; c++)
+                    {
+                        int index = i + c;
+                        if (index >= cards.Length)
+                        {
+                            GUILayout.FlexibleSpace();
+                            continue;
+                        }
+
+                        DrawDependencyStatusCard(cards[index].Name, cards[index].Status);
+                    }
+                }
             }
-            addRBS = EditorGUILayout.ToggleLeft("RBS 睡眠システム Ver2", addRBS);
-            addNadeSystem = EditorGUILayout.ToggleLeft("赤夜式 撫で音ギミック", addNadeSystem);
-            addLightLimitChanger = EditorGUILayout.ToggleLeft("LightLimitChanger", addLightLimitChanger);
-            addKawaiiNormal = EditorGUILayout.ToggleLeft("可愛いポーズ", addKawaiiNormal);
-            addKawaii8bitNoFoot = EditorGUILayout.ToggleLeft("可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot);
         }
+    }
 
-        bool hasTargets = previewTargets != null && previewTargets.Count > 0;
-        if (!hasTargets)
-            EditorGUILayout.HelpBox("導入対象のアバターが未選択です。ボタンの赤いアイコンは、実行対象がないため処理できない状態を示します。", MessageType.Warning);
-
-        if (DrawRunButton("導入テスト（DryRun）", hasTargets, 36))
+    private void DrawDependencyStatusCard(string toolName, string status)
+    {
+        using (new EditorGUILayout.VerticalScope("box", GUILayout.MinWidth(150), GUILayout.ExpandWidth(true)))
         {
-            toolStatusChecked = true;
-            avatarInstallStatusTargetKey = GetSingleAvatarInstallStatusTargetKey(previewTargets);
-            detailedLog = Run(false, false);
-            log = BuildConciseLog(detailedLog);
+            EditorGUILayout.LabelField(toolName, EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(SanitizeStatusForUi(status), EditorStyles.wordWrappedLabel);
         }
+    }
 
-        if (DrawRunButton("導入実行", hasTargets, 36))
+    private string SanitizeStatusForUi(string status)
+    {
+        if (string.IsNullOrEmpty(status))
+            return "未判定";
+
+        return status.Replace("Type not found", "ツール未導入")
+            .Replace("型が見つかりません", "ツール未導入")
+            .Replace("○ ", "")
+            .Replace("× ", "");
+    }
+
+    private void DrawInstallOptionsAndDryRun(List<SetupTarget> previewTargets)
+    {
+        using (new EditorGUILayout.VerticalScope("box"))
         {
-            toolStatusChecked = true;
-            avatarInstallStatusTargetKey = GetSingleAvatarInstallStatusTargetKey(previewTargets);
-            detailedLog = Run(true, false);
-            log = BuildConciseLog(detailedLog);
-        }
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUILayout.VerticalScope(GUILayout.MinWidth(300), GUILayout.ExpandWidth(true)))
+                    DrawInstallOptions(previewTargets);
 
-        if (GUILayout.Button("詳細ログを表示", GUILayout.Height(36)))
+                using (new EditorGUILayout.VerticalScope(GUILayout.Width(Mathf.Max(220f, position.width * 0.36f))))
+                    DrawDryRunSummary();
+            }
+
+            bool hasTargets = previewTargets != null && previewTargets.Count > 0;
+            if (!hasTargets)
+                EditorGUILayout.HelpBox("導入対象のアバターが未選択です。ボタンの赤いアイコンは、実行対象がないため処理できない状態を示します。", MessageType.Warning);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (DrawRunButton("導入テスト（DryRun）", hasTargets, 34))
+                {
+                    toolStatusChecked = true;
+                    avatarInstallStatusTargetKey = GetSingleAvatarInstallStatusTargetKey(previewTargets);
+                    detailedLog = Run(false, false);
+                    log = BuildConciseLog(detailedLog);
+                    UpdateLastDryRunSummary(detailedLog);
+                }
+
+                if (DrawRunButton("導入実行", hasTargets, 34))
+                {
+                    toolStatusChecked = true;
+                    avatarInstallStatusTargetKey = GetSingleAvatarInstallStatusTargetKey(previewTargets);
+                    detailedLog = Run(true, false);
+                    log = BuildConciseLog(detailedLog);
+                }
+            }
+        }
+    }
+
+    private void DrawInstallOptions(List<SetupTarget> previewTargets)
+    {
+        EditorGUILayout.LabelField("個別導入設定", EditorStyles.boldLabel);
+        DrawSingleAvatarInstallStatus(previewTargets);
+        allInstallKawaiiMode = (KawaiiPoseInstallMode)EditorGUILayout.EnumPopup("すべて導入時の可愛いポーズ", allInstallKawaiiMode);
+
+        using (new EditorGUILayout.HorizontalScope())
         {
-            AvatarSetupLogWindow.ShowLog(string.IsNullOrEmpty(detailedLog) ? log : detailedLog);
-        }
+            using (new EditorGUILayout.VerticalScope())
+            {
+                addAAO = EditorGUILayout.ToggleLeft("AAO / TraceAndOptimize", addAAO);
+                addLAC = EditorGUILayout.ToggleLeft("LAC / TextureCompressor", addLAC);
+                using (new EditorGUI.DisabledScope(!addLAC))
+                    lacPreset = (LacPresetMode)EditorGUILayout.EnumPopup("LAC Preset", lacPreset);
+                addRBS = EditorGUILayout.ToggleLeft("RBS 睡眠システム Ver2", addRBS);
+                addNadeSystem = EditorGUILayout.ToggleLeft("赤夜式 撫で音ギミック", addNadeSystem);
+            }
 
-        EditorGUILayout.LabelField("実行結果", EditorStyles.boldLabel);
-        scroll = EditorGUILayout.BeginScrollView(scroll);
-        EditorGUILayout.TextArea(log, GUILayout.ExpandHeight(true));
-        EditorGUILayout.EndScrollView();
+            using (new EditorGUILayout.VerticalScope())
+            {
+                addLightLimitChanger = EditorGUILayout.ToggleLeft("LightLimitChanger", addLightLimitChanger);
+                addKawaiiNormal = EditorGUILayout.ToggleLeft("可愛いポーズ", addKawaiiNormal);
+                addKawaii8bitNoFoot = EditorGUILayout.ToggleLeft("可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot);
+            }
+        }
+    }
+
+    private void DrawDryRunSummary()
+    {
+        EditorGUILayout.LabelField("前回のDryRun結果", EditorStyles.boldLabel);
+        using (new EditorGUILayout.VerticalScope("box", GUILayout.MinHeight(135)))
+        {
+            if (lastDryRunSummary.Count == 0)
+            {
+                EditorGUILayout.LabelField("まだDryRunは実行されていません", EditorStyles.wordWrappedLabel);
+                return;
+            }
+
+            dryRunSummaryScroll = EditorGUILayout.BeginScrollView(dryRunSummaryScroll, GUILayout.MinHeight(110));
+            foreach (var line in lastDryRunSummary)
+                EditorGUILayout.LabelField(line, EditorStyles.wordWrappedLabel);
+            EditorGUILayout.EndScrollView();
+        }
+    }
+
+    private void DrawDetailedLog()
+    {
+        using (new EditorGUILayout.VerticalScope("box"))
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("詳細ログ", EditorStyles.boldLabel);
+                if (GUILayout.Button("クリップボードコピー", GUILayout.Width(150)))
+                    EditorGUIUtility.systemCopyBuffer = string.IsNullOrEmpty(detailedLog) ? log : detailedLog;
+                if (GUILayout.Button("別ウィンドウで表示", GUILayout.Width(150)))
+                    AvatarSetupLogWindow.ShowLog(string.IsNullOrEmpty(detailedLog) ? log : detailedLog);
+            }
+
+            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.ExpandHeight(true));
+            EditorGUILayout.TextArea(log, GUILayout.ExpandHeight(true));
+            EditorGUILayout.EndScrollView();
+        }
     }
 
     private bool DrawRunButton(string label, bool hasTargets, int height)
@@ -545,6 +654,70 @@ public class AkiirayAvatarSetupTool : EditorWindow
             return FormatToolNotInstalledStatus();
 
         return "○ 導入済み" + FormatLightLimitChangerVariantSuffix(variant);
+    }
+
+    private void UpdateLastDryRunSummary(string detail)
+    {
+        lastDryRunSummary.Clear();
+
+        if (string.IsNullOrEmpty(detail))
+            return;
+
+        var labels = new[]
+        {
+            "AAO",
+            "LAC",
+            "RBS",
+            "赤夜式 撫で音",
+            "LightLimitChanger",
+            "可愛いポーズ",
+            "可愛いポーズ(8bit・足の高さなし)",
+        };
+
+        foreach (var label in labels)
+        {
+            var summary = FindDryRunSummaryForLabel(detail, label);
+            if (!string.IsNullOrEmpty(summary))
+                lastDryRunSummary.Add(label + ": " + summary);
+        }
+
+        if (lastDryRunSummary.Count == 0)
+            lastDryRunSummary.Add("DryRunは完了しました（詳細は詳細ログを確認してください）");
+    }
+
+    private string FindDryRunSummaryForLabel(string detail, string label)
+    {
+        var lines = detail.Split(new[] { '\n' }, StringSplitOptions.None);
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+            if (!line.StartsWith(label + ":", StringComparison.Ordinal))
+                continue;
+
+            if (line.Contains("[DRY]"))
+                return "追加予定";
+            if (line.Contains("[SKIP] ツール未導入") || line.Contains("Tool not installed"))
+                return "ツール未導入";
+            if (line.Contains("導入未選択"))
+                return "導入未選択";
+            if (line.Contains("Already installed") || line.Contains("[INFO] Already installed"))
+                return "導入済みのためスキップ";
+            if (line.Contains("Not Installed"))
+                return "未導入";
+            if (line.Contains("Installed"))
+                return "導入済み";
+        }
+
+        if (label == "LightLimitChanger")
+        {
+            var variant = GetLightLimitChangerToolVariant();
+            if (variant == LightLimitChangerVariant.V1)
+                return "導入済み(V1)";
+            if (variant == LightLimitChangerVariant.V2)
+                return "導入済み(V2)";
+        }
+
+        return "";
     }
 
     private string BuildConciseLog(string detail)
