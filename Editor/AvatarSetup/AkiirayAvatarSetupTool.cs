@@ -48,6 +48,21 @@ public class AkiirayAvatarSetupTool : EditorWindow
         new GUIContent("Project内の全Prefab"),
     };
 
+    private static readonly GUIContent[] KawaiiPoseInstallModeLabels =
+    {
+        new GUIContent("導入しない"),
+        new GUIContent("可愛いポーズ"),
+        new GUIContent("可愛いポーズ（8bit・足の高さなし）"),
+        new GUIContent("両方"),
+    };
+
+    private static readonly GUIContent[] KawaiiPoseDialogPolicyLabels =
+    {
+        new GUIContent("自動（単体は公式導入／一括はPrefabのみ）"),
+        new GUIContent("常に公式導入（確認あり）"),
+        new GUIContent("常にサイレント導入（Prefabのみ）"),
+    };
+
     private sealed class SetupTarget
     {
         public bool IsPrefabAsset;
@@ -369,8 +384,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
     {
         EditorGUILayout.LabelField("個別導入設定", EditorStyles.boldLabel);
         DrawSingleAvatarInstallStatus(previewTargets);
-        allInstallKawaiiMode = (KawaiiPoseInstallMode)EditorGUILayout.EnumPopup("すべて導入時の可愛いポーズ", allInstallKawaiiMode);
-        kawaiiPoseDialogPolicy = (KawaiiPoseDialogPolicy)EditorGUILayout.EnumPopup(new GUIContent("可愛いポーズ導入オプション", "Auto: 単体導入では表示、一括導入ではスキップ / AlwaysShow: 常に公式確認を表示 / AlwaysSkip: 常に公式確認をスキップ"), kawaiiPoseDialogPolicy);
+        allInstallKawaiiMode = DrawKawaiiPoseInstallModePopup("すべて導入時の可愛いポーズ", allInstallKawaiiMode);
+        kawaiiPoseDialogPolicy = DrawKawaiiPoseDialogPolicyPopup("可愛いポーズ導入方式", kawaiiPoseDialogPolicy);
         EditorGUILayout.HelpBox(GetKawaiiPoseDialogPolicyDescription(), MessageType.Info);
 
         using (new EditorGUILayout.HorizontalScope())
@@ -380,7 +395,16 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 addAAO = EditorGUILayout.ToggleLeft("AAO / TraceAndOptimize", addAAO);
                 addLAC = EditorGUILayout.ToggleLeft("LAC / TextureCompressor", addLAC);
                 using (new EditorGUI.DisabledScope(!addLAC))
-                    lacPreset = (LacPresetMode)EditorGUILayout.EnumPopup("LAC Preset", lacPreset);
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.LabelField("LAC Preset", GUILayout.Width(90));
+                        lacPreset = (LacPresetMode)EditorGUILayout.EnumPopup(
+                            lacPreset,
+                            GUILayout.MinWidth(180),
+                            GUILayout.ExpandWidth(true));
+                    }
+                }
                 addRBS = EditorGUILayout.ToggleLeft("RBS 睡眠システム Ver2", addRBS);
                 addNadeSystem = EditorGUILayout.ToggleLeft("赤夜式 撫で音ギミック", addNadeSystem);
             }
@@ -394,16 +418,29 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
     }
 
+    private KawaiiPoseInstallMode DrawKawaiiPoseInstallModePopup(string label, KawaiiPoseInstallMode value)
+    {
+        return (KawaiiPoseInstallMode)EditorGUILayout.Popup(new GUIContent(label), (int)value, KawaiiPoseInstallModeLabels);
+    }
+
+    private KawaiiPoseDialogPolicy DrawKawaiiPoseDialogPolicyPopup(string label, KawaiiPoseDialogPolicy value)
+    {
+        return (KawaiiPoseDialogPolicy)EditorGUILayout.Popup(
+            new GUIContent(label, "公式導入は可愛いポーズ公式ツールの確認に従います。サイレント導入はPrefabのみ追加します。"),
+            (int)value,
+            KawaiiPoseDialogPolicyLabels);
+    }
+
     private string GetKawaiiPoseDialogPolicyDescription()
     {
         switch (kawaiiPoseDialogPolicy)
         {
             case KawaiiPoseDialogPolicy.AlwaysShow:
-                return "AlwaysShow: 常に公式確認を表示";
+                return "常に公式導入: すべての対象で公式AddPrefabを呼び出します。\n対応アバター用プリセットが見つかった場合の適用確認や、プレビルド確認が表示される場合があります。\n大量のPrefabに一括適用すると、確認ダイアログが対象数分表示される可能性があります。";
             case KawaiiPoseDialogPolicy.AlwaysSkip:
-                return "AlwaysSkip: 常に公式確認をスキップ。スキップ時は公式のプレビルド確認およびアバター個別プリセット適用を行わず、Prefabのみ追加します。";
+                return "常にサイレント導入: 公式AddPrefabを呼ばず、Prefabのみ追加します。\n対応アバター用プリセット適用確認とプレビルド確認は行いません。\n調整済みプリセットも自動適用されません。";
             default:
-                return "Auto: 単体導入では表示、一括導入ではスキップ。スキップ時は公式のプレビルド確認およびアバター個別プリセット適用を行わず、Prefabのみ追加します。";
+                return "自動: Hierarchyの1体またはProjectのPrefab1体では公式導入を使います。\nフォルダ内Prefab、Project全体、または複数対象への一括導入では、確認ダイアログの大量表示を避けるためサイレント導入を使います。\nサイレント導入時はPrefabのみ追加し、対応アバター用プリセット適用確認とプレビルド確認は行いません。";
         }
     }
 
@@ -1731,12 +1768,12 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
         if (!apply)
         {
-            sb.AppendLine(prefabName + ": [DRY] Call official AddPrefab(\"" + prefabName + "\")");
+            sb.AppendLine(prefabName + ": [DRY] 公式AddPrefabを実行予定。対応アバター用プリセット適用確認やプレビルド確認が表示される場合があります。");
             return;
         }
 
         InvokeWithSelection(avatarRoot, () => addPrefab.Invoke(null, new object[] { prefabName }));
-        sb.AppendLine(prefabName + ": [OK] Called official AddPrefab");
+        sb.AppendLine(prefabName + ": [OK] 公式AddPrefabを実行しました。公式ツール側の確認ダイアログが表示される場合があります。");
     }
 
     private void InstallKawaiiSilent(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply)
@@ -1751,7 +1788,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         var prefabPath = AssetDatabase.GetAssetPath(prefab);
         if (!apply)
         {
-            sb.AppendLine(prefabName + ": [DRY] サイレント導入予定。公式のプレビルド確認とアバター個別プリセット適用確認はスキップします。Prefab: " + prefabPath);
+            sb.AppendLine(prefabName + ": [DRY] サイレント導入予定。公式確認は表示せず、Prefabのみ追加します。対応アバター用プリセット適用確認とプレビルド確認は行いません。Prefab: " + prefabPath);
             return;
         }
 
@@ -1764,7 +1801,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
         Undo.RegisterCreatedObjectUndo(instanceObj, "Add " + prefabName);
         EditorUtility.SetDirty(instanceObj);
-        sb.AppendLine(prefabName + ": [OK] サイレント導入しました。公式のプレビルド確認とアバター個別プリセット適用確認はスキップしました。Prefab: " + prefabPath);
+        sb.AppendLine(prefabName + ": [OK] サイレント導入しました。公式確認は表示せず、Prefabのみ追加しました。対応アバター用プリセット適用確認とプレビルド確認は行っていません。Prefab: " + prefabPath);
     }
 
     private GameObject FindPrefabByExactName(string prefabName)
