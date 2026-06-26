@@ -33,6 +33,13 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AllProjectPrefabs
     }
 
+    private enum KawaiiPoseDialogPolicy
+    {
+        Auto,
+        AlwaysShow,
+        AlwaysSkip
+    }
+
     private static readonly GUIContent[] TargetModeLabels =
     {
         new GUIContent("Hierarchyで選択中のアバター"),
@@ -61,6 +68,11 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool toolStatusChecked = false;
     private string avatarInstallStatusTargetKey = "";
     private List<GameObject> hierarchyAvatarSlots = new List<GameObject>();
+    private List<SetupTarget> cachedTargets = new List<SetupTarget>();
+    private string cachedTargetKey = "";
+    private bool targetCacheDirty = true;
+    private bool lastTargetScanCanceled = false;
+    private readonly Dictionary<string, string> kawaiiPrefabPathCache = new Dictionary<string, string>();
 
     private bool addAAO = true;
     private bool addLAC = true;
@@ -71,6 +83,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool addKawaiiNormal = false;
     private bool addKawaii8bitNoFoot = true;
     private KawaiiPoseInstallMode allInstallKawaiiMode = KawaiiPoseInstallMode.EightBitNoFoot;
+    private KawaiiPoseDialogPolicy kawaiiPoseDialogPolicy = KawaiiPoseDialogPolicy.Auto;
 
     private const string AAOTypeName = "Anatawa12.AvatarOptimizer.TraceAndOptimize";
     private const string LACTypeName = "dev.limitex.avatar.compressor.TextureCompressor";
@@ -198,24 +211,40 @@ public class AkiirayAvatarSetupTool : EditorWindow
         {
             EditorGUILayout.LabelField("対象選択・操作", EditorStyles.boldLabel);
             DrawTargetModePopup();
+            EditorGUI.BeginChangeCheck();
             requireAvatarDescriptor = EditorGUILayout.ToggleLeft("VRCAvatarDescriptorがあるPrefab/Hierarchyだけ対象", requireAvatarDescriptor);
+            if (EditorGUI.EndChangeCheck())
+                InvalidateTargetCache(clearTargets: targetMode == TargetMode.SelectedProjectFolderPrefabs || targetMode == TargetMode.AllProjectPrefabs);
 
             if (targetMode == TargetMode.SelectedProjectFolderPrefabs)
             {
+                EditorGUILayout.LabelField("対象フォルダ:", string.IsNullOrEmpty(selectedFolderPath) ? "<未指定>" : selectedFolderPath);
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUILayout.TextField("対象フォルダ", string.IsNullOrEmpty(selectedFolderPath) ? "<未指定: Projectで選択中フォルダを使用>" : selectedFolderPath);
-                    if (GUILayout.Button("選択フォルダを使用", GUILayout.Width(130)))
+                    if (GUILayout.Button("選択中フォルダを対象にする"))
                     {
                         selectedFolderPath = GetSelectedFolderPath() ?? "";
+                        InvalidateTargetCache(clearTargets: true);
+                    }
+                    if (GUILayout.Button("対象Prefabを走査"))
+                        RefreshTargetCache();
+                    if (GUILayout.Button("対象フォルダをクリア"))
+                    {
+                        selectedFolderPath = "";
+                        InvalidateTargetCache(clearTargets: true);
                     }
                 }
+            }
+            else if (targetMode == TargetMode.AllProjectPrefabs)
+            {
+                if (GUILayout.Button("対象Prefabを走査"))
+                    RefreshTargetCache();
             }
 
             if (targetMode == TargetMode.SelectedHierarchyAvatars)
                 DrawHierarchyAvatarSlots();
 
-            previewTargets = BuildTargets();
+            previewTargets = GetCachedTargets();
             DrawDetectedTargets(previewTargets);
 
             using (new EditorGUILayout.HorizontalScope())
@@ -310,7 +339,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
                     DrawDryRunSummary();
             }
 
-            bool hasTargets = previewTargets != null && previewTargets.Count > 0;
+            bool hasTargets = (previewTargets != null && previewTargets.Count > 0) || CanRefreshTargetsForRun();
             if (!hasTargets)
                 EditorGUILayout.HelpBox("導入対象のアバターが未選択です。ボタンの赤いアイコンは、実行対象がないため処理できない状態を示します。", MessageType.Warning);
 
@@ -341,6 +370,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
         EditorGUILayout.LabelField("個別導入設定", EditorStyles.boldLabel);
         DrawSingleAvatarInstallStatus(previewTargets);
         allInstallKawaiiMode = (KawaiiPoseInstallMode)EditorGUILayout.EnumPopup("すべて導入時の可愛いポーズ", allInstallKawaiiMode);
+        kawaiiPoseDialogPolicy = (KawaiiPoseDialogPolicy)EditorGUILayout.EnumPopup(new GUIContent("可愛いポーズ導入オプション", "Auto: 単体導入では表示、一括導入ではスキップ / AlwaysShow: 常に公式確認を表示 / AlwaysSkip: 常に公式確認をスキップ"), kawaiiPoseDialogPolicy);
+        EditorGUILayout.HelpBox(GetKawaiiPoseDialogPolicyDescription(), MessageType.Info);
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -360,6 +391,19 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 addKawaiiNormal = EditorGUILayout.ToggleLeft("可愛いポーズ", addKawaiiNormal);
                 addKawaii8bitNoFoot = EditorGUILayout.ToggleLeft("可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot);
             }
+        }
+    }
+
+    private string GetKawaiiPoseDialogPolicyDescription()
+    {
+        switch (kawaiiPoseDialogPolicy)
+        {
+            case KawaiiPoseDialogPolicy.AlwaysShow:
+                return "AlwaysShow: 常に公式確認を表示";
+            case KawaiiPoseDialogPolicy.AlwaysSkip:
+                return "AlwaysSkip: 常に公式確認をスキップ。スキップ時は公式のプレビルド確認およびアバター個別プリセット適用を行わず、Prefabのみ追加します。";
+            default:
+                return "Auto: 単体導入では表示、一括導入ではスキップ。スキップ時は公式のプレビルド確認およびアバター個別プリセット適用を行わず、Prefabのみ追加します。";
         }
     }
 
@@ -410,6 +454,15 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return GUILayout.Button(content, GUILayout.Height(height));
     }
 
+    private bool CanRefreshTargetsForRun()
+    {
+        if (targetMode == TargetMode.SelectedProjectFolderPrefabs)
+            return !string.IsNullOrEmpty(selectedFolderPath) && AssetDatabase.IsValidFolder(selectedFolderPath);
+        if (targetMode == TargetMode.AllProjectPrefabs)
+            return true;
+        return false;
+    }
+
     private void DrawDependencyOverview()
     {
         EditorGUILayout.LabelField("AAO", GetTypeToolDependencyState(AAOTypeName));
@@ -422,7 +475,10 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void DrawTargetModePopup()
     {
+        EditorGUI.BeginChangeCheck();
         targetMode = (TargetMode)EditorGUILayout.Popup(new GUIContent("対象モード"), (int)targetMode, TargetModeLabels);
+        if (EditorGUI.EndChangeCheck())
+            InvalidateTargetCache(clearTargets: true);
     }
 
     private void DrawHierarchyAvatarSlots()
@@ -440,13 +496,17 @@ public class AkiirayAvatarSetupTool : EditorWindow
             using (new EditorGUILayout.HorizontalScope("box"))
             {
                 EditorGUILayout.LabelField((i + 1) + "体目", EditorStyles.boldLabel, GUILayout.Width(48));
+                EditorGUI.BeginChangeCheck();
                 hierarchyAvatarSlots[i] = (GameObject)EditorGUILayout.ObjectField(hierarchyAvatarSlots[i], typeof(GameObject), true);
+                if (EditorGUI.EndChangeCheck())
+                    InvalidateTargetCache();
 
                 using (new EditorGUI.DisabledScope(hierarchyAvatarSlots.Count <= 1))
                 {
                     if (GUILayout.Button("−", GUILayout.Width(28)))
                     {
                         hierarchyAvatarSlots.RemoveAt(i);
+                        InvalidateTargetCache();
                         GUI.FocusControl(null);
                         break;
                     }
@@ -457,9 +517,15 @@ public class AkiirayAvatarSetupTool : EditorWindow
         using (new EditorGUILayout.HorizontalScope())
         {
             if (GUILayout.Button("＋ 対象枠を追加"))
+            {
                 hierarchyAvatarSlots.Add(null);
+                InvalidateTargetCache();
+            }
             if (GUILayout.Button("選択中のHierarchyを追加"))
+            {
                 AddSelectedHierarchyAvatarsToSlots();
+                InvalidateTargetCache();
+            }
         }
     }
 
@@ -854,7 +920,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private string Run(bool apply, bool checkOnly)
     {
         var sb = new StringBuilder();
-        var targets = BuildTargets();
+        kawaiiPrefabPathCache.Clear();
+        var targets = RefreshTargetCache();
 
         sb.AppendLine("# Akiiray Avatar Setup Report");
         sb.AppendLine("Generated: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
@@ -862,6 +929,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
         sb.AppendLine("Mode: " + (checkOnly ? "Check Only" : (apply ? "Apply" : "Dry Run")));
         sb.AppendLine("TargetMode: " + targetMode);
         sb.AppendLine("TargetCount: " + targets.Count);
+        if (lastTargetScanCanceled)
+            sb.AppendLine("対象Prefab走査をキャンセルしました。");
         sb.AppendLine();
 
         sb.AppendLine("============================================================");
@@ -879,7 +948,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         {
             sb.AppendLine("============================================================");
             sb.AppendLine("## Target: " + target.Label);
-            RunForTarget(sb, target, apply, checkOnly);
+            RunForTarget(sb, target, apply, checkOnly, targets.Count);
             sb.AppendLine();
         }
 
@@ -892,7 +961,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return sb.ToString();
     }
 
-    private void RunForTarget(StringBuilder sb, SetupTarget target, bool apply, bool checkOnly)
+    private void RunForTarget(StringBuilder sb, SetupTarget target, bool apply, bool checkOnly, int totalTargetCount)
     {
         if (target.IsPrefabAsset)
         {
@@ -908,7 +977,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
                         return;
                     }
 
-                    RunForAvatarRoot(sb, avatarRoot, apply: true, checkOnly: checkOnly, isPrefabAsset: true);
+                    RunForAvatarRoot(sb, avatarRoot, apply: true, checkOnly: checkOnly, isPrefabAsset: true, totalTargetCount: totalTargetCount);
                     PrefabUtility.SaveAsPrefabAsset(loadedRoot, target.PrefabAssetPath);
                     sb.AppendLine("[OK] Saved prefab: " + target.PrefabAssetPath);
                 }
@@ -927,7 +996,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
                     return;
                 }
 
-                RunForAvatarRoot(sb, avatarRoot, apply: false, checkOnly: checkOnly, isPrefabAsset: true);
+                RunForAvatarRoot(sb, avatarRoot, apply: false, checkOnly: checkOnly, isPrefabAsset: true, totalTargetCount: totalTargetCount);
             }
         }
         else
@@ -939,11 +1008,11 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 return;
             }
 
-            RunForAvatarRoot(sb, avatarRoot, apply, checkOnly, isPrefabAsset: false);
+            RunForAvatarRoot(sb, avatarRoot, apply, checkOnly, isPrefabAsset: false, totalTargetCount: totalTargetCount);
         }
     }
 
-    private void RunForAvatarRoot(StringBuilder sb, GameObject avatarRoot, bool apply, bool checkOnly, bool isPrefabAsset)
+    private void RunForAvatarRoot(StringBuilder sb, GameObject avatarRoot, bool apply, bool checkOnly, bool isPrefabAsset, int totalTargetCount)
     {
         sb.AppendLine("Avatar Root: " + GetPath(avatarRoot.transform));
         sb.AppendLine("Asset Mode: " + (isPrefabAsset ? "Project Prefab" : "Hierarchy"));
@@ -972,8 +1041,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
             RunInstallOrSkip(sb, avatarRoot, "RBS", addRBS, IsRbsToolAvailable(), () => InstallPrefabByName(sb, avatarRoot, "RBS", RBSPrefabNames, apply));
             RunInstallOrSkip(sb, avatarRoot, "赤夜式 撫で音", addNadeSystem, IsTypeAvailable(NadeSettingsTypeName), () => InstallPrefabByName(sb, avatarRoot, "赤夜式 撫で音", new[] { "NadeSystem" }, apply));
             RunInstallOrSkip(sb, avatarRoot, "LightLimitChanger", addLightLimitChanger, IsLightLimitChangerToolAvailable(), () => InstallLightLimitChangerOfficial(sb, avatarRoot, apply));
-            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ", addKawaiiNormal, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ", apply));
-            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", apply));
+            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ", addKawaiiNormal, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ", apply, ShouldSkipKawaiiOfficialDialog(totalTargetCount)));
+            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", apply, ShouldSkipKawaiiOfficialDialog(totalTargetCount)));
 
             if (apply)
             {
@@ -1058,6 +1127,57 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return "";
     }
 
+    private void InvalidateTargetCache(bool clearTargets = false)
+    {
+        targetCacheDirty = true;
+        if (clearTargets)
+        {
+            cachedTargets.Clear();
+            cachedTargetKey = "";
+        }
+    }
+
+    private List<SetupTarget> GetCachedTargets()
+    {
+        var key = BuildTargetCacheKey();
+        if (targetCacheDirty || cachedTargetKey != key)
+        {
+            if (targetMode == TargetMode.SelectedHierarchyAvatars || targetMode == TargetMode.SelectedProjectPrefabAssets)
+                return RefreshTargetCache();
+
+            return new List<SetupTarget>();
+        }
+
+        return cachedTargets ?? (cachedTargets = new List<SetupTarget>());
+    }
+
+    private List<SetupTarget> RefreshTargetCache()
+    {
+        lastTargetScanCanceled = false;
+        cachedTargets = BuildTargets();
+        cachedTargetKey = BuildTargetCacheKey();
+        targetCacheDirty = false;
+        return cachedTargets;
+    }
+
+    private string BuildTargetCacheKey()
+    {
+        var sb = new StringBuilder();
+        sb.Append(targetMode).Append('|').Append(requireAvatarDescriptor).Append('|').Append(selectedFolderPath);
+        if (targetMode == TargetMode.SelectedHierarchyAvatars)
+        {
+            EnsureHierarchyAvatarSlots();
+            foreach (var go in hierarchyAvatarSlots)
+                sb.Append('|').Append(go != null ? go.GetInstanceID().ToString() : "null");
+        }
+        else if (targetMode == TargetMode.SelectedProjectPrefabAssets)
+        {
+            foreach (var path in GetSelectedPrefabAssetPaths())
+                sb.Append('|').Append(path);
+        }
+        return sb.ToString();
+    }
+
     private List<SetupTarget> BuildTargets()
     {
         var list = new List<SetupTarget>();
@@ -1089,20 +1209,41 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
         else if (targetMode == TargetMode.SelectedProjectFolderPrefabs)
         {
-            var folder = string.IsNullOrEmpty(selectedFolderPath) ? GetSelectedFolderPath() : selectedFolderPath;
+            var folder = selectedFolderPath;
             if (!string.IsNullOrEmpty(folder) && AssetDatabase.IsValidFolder(folder))
             {
-                foreach (var path in FindPrefabPathsInFolder(folder))
-                    AddPrefabTargetIfValid(list, path);
+                AddPrefabTargetsWithProgress(list, FindPrefabPathsInFolder(folder), "対象Prefab走査", folder);
             }
         }
         else if (targetMode == TargetMode.AllProjectPrefabs)
         {
-            foreach (var path in FindAllProjectPrefabPaths())
-                AddPrefabTargetIfValid(list, path);
+            AddPrefabTargetsWithProgress(list, FindAllProjectPrefabPaths(), "対象Prefab走査", "Project内の全Prefab");
         }
 
         return list;
+    }
+
+    private void AddPrefabTargetsWithProgress(List<SetupTarget> list, string[] paths, string title, string info)
+    {
+        try
+        {
+            for (int i = 0; i < paths.Length; i++)
+            {
+                if (paths.Length > 25 && EditorUtility.DisplayCancelableProgressBar(title, info + "\n" + paths[i], (float)i / paths.Length))
+                {
+                    lastTargetScanCanceled = true;
+                    detailedLog = "対象Prefab走査をキャンセルしました。\n";
+                    log = detailedLog;
+                    break;
+                }
+
+                AddPrefabTargetIfValid(list, paths[i]);
+            }
+        }
+        finally
+        {
+            EditorUtility.ClearProgressBar();
+        }
     }
 
     private void AddPrefabTargetIfValid(List<SetupTarget> list, string path)
@@ -1543,7 +1684,19 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return false;
     }
 
-    private void InstallKawaiiOfficial(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply)
+    private bool ShouldSkipKawaiiOfficialDialog(int totalTargetCount)
+    {
+        if (kawaiiPoseDialogPolicy == KawaiiPoseDialogPolicy.AlwaysShow)
+            return false;
+        if (kawaiiPoseDialogPolicy == KawaiiPoseDialogPolicy.AlwaysSkip)
+            return true;
+
+        return targetMode == TargetMode.SelectedProjectFolderPrefabs
+            || targetMode == TargetMode.AllProjectPrefabs
+            || totalTargetCount >= 2;
+    }
+
+    private void InstallKawaiiOfficial(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply, bool skipOfficialDialogs)
     {
         var componentType = FindType(KawaiiComponentTypeName);
         if (componentType == null)
@@ -1559,6 +1712,12 @@ public class AkiirayAvatarSetupTool : EditorWindow
         if (exists)
         {
             sb.AppendLine(prefabName + ": [SKIP] Already installed");
+            return;
+        }
+
+        if (skipOfficialDialogs)
+        {
+            InstallKawaiiSilent(sb, avatarRoot, prefabName, apply);
             return;
         }
 
@@ -1578,6 +1737,62 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
         InvokeWithSelection(avatarRoot, () => addPrefab.Invoke(null, new object[] { prefabName }));
         sb.AppendLine(prefabName + ": [OK] Called official AddPrefab");
+    }
+
+    private void InstallKawaiiSilent(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply)
+    {
+        var prefab = FindKawaiiPrefabByExactNameCached(prefabName);
+        if (prefab == null)
+        {
+            sb.AppendLine(prefabName + ": [SKIP] Prefab not found for silent install");
+            return;
+        }
+
+        var prefabPath = AssetDatabase.GetAssetPath(prefab);
+        if (!apply)
+        {
+            sb.AppendLine(prefabName + ": [DRY] サイレント導入予定。公式のプレビルド確認とアバター個別プリセット適用確認はスキップします。Prefab: " + prefabPath);
+            return;
+        }
+
+        var instanceObj = PrefabUtility.InstantiatePrefab(prefab, avatarRoot.transform) as GameObject;
+        if (instanceObj == null)
+        {
+            sb.AppendLine(prefabName + ": [ERROR] Silent install prefab failed: InstantiatePrefab returned null");
+            return;
+        }
+
+        Undo.RegisterCreatedObjectUndo(instanceObj, "Add " + prefabName);
+        EditorUtility.SetDirty(instanceObj);
+        sb.AppendLine(prefabName + ": [OK] サイレント導入しました。公式のプレビルド確認とアバター個別プリセット適用確認はスキップしました。Prefab: " + prefabPath);
+    }
+
+    private GameObject FindPrefabByExactName(string prefabName)
+    {
+        var guids = AssetDatabase.FindAssets("t:Prefab " + prefabName);
+        foreach (var guid in guids)
+        {
+            var path = AssetDatabase.GUIDToAssetPath(guid);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (prefab != null && prefab.name == prefabName)
+                return prefab;
+        }
+
+        return null;
+    }
+
+    private GameObject FindKawaiiPrefabByExactNameCached(string prefabName)
+    {
+        if (!kawaiiPrefabPathCache.TryGetValue(prefabName, out var path))
+        {
+            var prefab = FindPrefabByExactName(prefabName);
+            path = prefab != null ? AssetDatabase.GetAssetPath(prefab) : "";
+            kawaiiPrefabPathCache[prefabName] = path;
+        }
+
+        return string.IsNullOrEmpty(path)
+            ? null
+            : AssetDatabase.LoadAssetAtPath<GameObject>(path);
     }
 
     private void InstallPrefabByName(StringBuilder sb, GameObject avatarRoot, string label, string[] prefabNames, bool apply)
