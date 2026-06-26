@@ -5,6 +5,8 @@ using System.Text;
 using System.Linq;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Security.Cryptography;
+using UnityEditor.Presets;
 
 public class AkiirayAvatarSetupTool : EditorWindow
 {
@@ -33,11 +35,11 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AllProjectPrefabs
     }
 
-    private enum KawaiiPoseDialogPolicy
+    private enum KawaiiPoseInstallBehavior
     {
-        Auto,
-        AlwaysShow,
-        AlwaysSkip
+        AutoApplyPresetSkipPrebuild,
+        OfficialWithDialogs,
+        PrefabOnly
     }
 
     private static readonly GUIContent[] TargetModeLabels =
@@ -56,11 +58,11 @@ public class AkiirayAvatarSetupTool : EditorWindow
         new GUIContent("両方"),
     };
 
-    private static readonly GUIContent[] KawaiiPoseDialogPolicyLabels =
+    private static readonly GUIContent[] KawaiiPoseInstallBehaviorLabels =
     {
-        new GUIContent("自動（単体は公式導入／一括はPrefabのみ）"),
-        new GUIContent("常に公式導入（確認あり）"),
-        new GUIContent("常にサイレント導入（Prefabのみ）"),
+        new GUIContent("プリセット自動適用・プレビルドなし"),
+        new GUIContent("公式導入（確認あり）"),
+        new GUIContent("Prefabのみ追加"),
     };
 
     private sealed class SetupTarget
@@ -69,6 +71,13 @@ public class AkiirayAvatarSetupTool : EditorWindow
         public string PrefabAssetPath;
         public GameObject SceneObject;
         public string Label;
+    }
+
+    private sealed class KawaiiPresetMatch
+    {
+        public Preset Preset;
+        public string AvatarName;
+        public string MatchType;
     }
 
     private Vector2 scroll;
@@ -88,6 +97,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool targetCacheDirty = true;
     private bool lastTargetScanCanceled = false;
     private readonly Dictionary<string, string> kawaiiPrefabPathCache = new Dictionary<string, string>();
+    private readonly List<UnityEngine.Object> kawaiiPresetDefinesCache = new List<UnityEngine.Object>();
+    private bool kawaiiPresetDefinesCacheReady = false;
 
     private bool addAAO = true;
     private bool addLAC = true;
@@ -98,7 +109,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool addKawaiiNormal = false;
     private bool addKawaii8bitNoFoot = true;
     private KawaiiPoseInstallMode allInstallKawaiiMode = KawaiiPoseInstallMode.EightBitNoFoot;
-    private KawaiiPoseDialogPolicy kawaiiPoseDialogPolicy = KawaiiPoseDialogPolicy.Auto;
+    private KawaiiPoseInstallBehavior kawaiiPoseInstallBehavior = KawaiiPoseInstallBehavior.AutoApplyPresetSkipPrebuild;
 
     private const string AAOTypeName = "Anatawa12.AvatarOptimizer.TraceAndOptimize";
     private const string LACTypeName = "dev.limitex.avatar.compressor.TextureCompressor";
@@ -125,6 +136,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
     };
     private const string KawaiiComponentTypeName = "jp.unisakistudio.kawaiiposing.KawaiiPosing";
     private const string PosingSystemMenuItemsTypeName = "jp.unisakistudio.posingsystemeditor.PosingSystemMenuItems";
+    private const string PosingSystemComponentTypeName = "jp.unisakistudio.posingsystem.PosingSystem";
+    private const string PosingSystemPresetDefinesTypeName = "jp.unisakistudio.posingsystemeditor.PosingSystemPresetDefines";
     private const string NadeSettingsTypeName = "RedNightWorks.NadeSystem.NadeSystemSettings";
     private static readonly string[] RBSPrefabNames =
     {
@@ -385,8 +398,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
         EditorGUILayout.LabelField("個別導入設定", EditorStyles.boldLabel);
         DrawSingleAvatarInstallStatus(previewTargets);
         allInstallKawaiiMode = DrawKawaiiPoseInstallModePopup("すべて導入時の可愛いポーズ", allInstallKawaiiMode);
-        kawaiiPoseDialogPolicy = DrawKawaiiPoseDialogPolicyPopup("可愛いポーズ導入方式", kawaiiPoseDialogPolicy);
-        EditorGUILayout.HelpBox(GetKawaiiPoseDialogPolicyDescription(), MessageType.Info);
+        kawaiiPoseInstallBehavior = DrawKawaiiPoseInstallBehaviorPopup("可愛いポーズ導入方式", kawaiiPoseInstallBehavior);
+        EditorGUILayout.HelpBox(GetKawaiiPoseInstallBehaviorDescription(), MessageType.Info);
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -423,24 +436,24 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return (KawaiiPoseInstallMode)EditorGUILayout.Popup(new GUIContent(label), (int)value, KawaiiPoseInstallModeLabels);
     }
 
-    private KawaiiPoseDialogPolicy DrawKawaiiPoseDialogPolicyPopup(string label, KawaiiPoseDialogPolicy value)
+    private KawaiiPoseInstallBehavior DrawKawaiiPoseInstallBehaviorPopup(string label, KawaiiPoseInstallBehavior value)
     {
-        return (KawaiiPoseDialogPolicy)EditorGUILayout.Popup(
-            new GUIContent(label, "公式導入は可愛いポーズ公式ツールの確認に従います。サイレント導入はPrefabのみ追加します。"),
+        return (KawaiiPoseInstallBehavior)EditorGUILayout.Popup(
+            new GUIContent(label, "可愛いポーズPrefabの追加方法と対応アバター用プリセットの扱いを選びます。"),
             (int)value,
-            KawaiiPoseDialogPolicyLabels);
+            KawaiiPoseInstallBehaviorLabels);
     }
 
-    private string GetKawaiiPoseDialogPolicyDescription()
+    private string GetKawaiiPoseInstallBehaviorDescription()
     {
-        switch (kawaiiPoseDialogPolicy)
+        switch (kawaiiPoseInstallBehavior)
         {
-            case KawaiiPoseDialogPolicy.AlwaysShow:
-                return "常に公式導入: すべての対象で公式AddPrefabを呼び出します。\n対応アバター用プリセットが見つかった場合の適用確認や、プレビルド確認が表示される場合があります。\n大量のPrefabに一括適用すると、確認ダイアログが対象数分表示される可能性があります。";
-            case KawaiiPoseDialogPolicy.AlwaysSkip:
-                return "常にサイレント導入: 公式AddPrefabを呼ばず、Prefabのみ追加します。\n対応アバター用プリセット適用確認とプレビルド確認は行いません。\n調整済みプリセットも自動適用されません。";
+            case KawaiiPoseInstallBehavior.OfficialWithDialogs:
+                return "可愛いポーズ公式ツールのAddPrefabを呼びます。対応アバター用プリセットの適用確認やプレビルド確認が表示される場合があります。大量のPrefabに実行すると確認が多数表示される可能性があります。";
+            case KawaiiPoseInstallBehavior.PrefabOnly:
+                return "Prefabのみ追加します。対応アバター用プリセットの検索・適用とプレビルドは行いません。確認ダイアログも表示されません。";
             default:
-                return "自動: Hierarchyの1体またはProjectのPrefab1体では公式導入を使います。\nフォルダ内Prefab、Project全体、または複数対象への一括導入では、確認ダイアログの大量表示を避けるためサイレント導入を使います。\nサイレント導入時はPrefabのみ追加し、対応アバター用プリセット適用確認とプレビルド確認は行いません。";
+                return "対応アバター用プリセットが見つかった場合は自動適用し、プレビルドは実行しません。確認ダイアログは表示されません。大量のPrefabへの一括導入に推奨です。";
         }
     }
 
@@ -958,6 +971,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
     {
         var sb = new StringBuilder();
         kawaiiPrefabPathCache.Clear();
+        kawaiiPresetDefinesCache.Clear();
+        kawaiiPresetDefinesCacheReady = false;
         var targets = RefreshTargetCache();
 
         sb.AppendLine("# Akiiray Avatar Setup Report");
@@ -1078,8 +1093,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
             RunInstallOrSkip(sb, avatarRoot, "RBS", addRBS, IsRbsToolAvailable(), () => InstallPrefabByName(sb, avatarRoot, "RBS", RBSPrefabNames, apply));
             RunInstallOrSkip(sb, avatarRoot, "赤夜式 撫で音", addNadeSystem, IsTypeAvailable(NadeSettingsTypeName), () => InstallPrefabByName(sb, avatarRoot, "赤夜式 撫で音", new[] { "NadeSystem" }, apply));
             RunInstallOrSkip(sb, avatarRoot, "LightLimitChanger", addLightLimitChanger, IsLightLimitChangerToolAvailable(), () => InstallLightLimitChangerOfficial(sb, avatarRoot, apply));
-            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ", addKawaiiNormal, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ", apply, ShouldSkipKawaiiOfficialDialog(totalTargetCount)));
-            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiOfficial(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", apply, ShouldSkipKawaiiOfficialDialog(totalTargetCount)));
+            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ", addKawaiiNormal, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiPose(sb, avatarRoot, "可愛いポーズ", apply));
+            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiPose(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", apply));
 
             if (apply)
             {
@@ -1310,6 +1325,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AppendTypeLine(sb, "LightLimitChanger V1 Installer", LLCV1InstallerTypeName);
         AppendPrefabCandidateLine(sb, "LightLimitChanger Prefab", LLCPrefabNames);
         AppendTypeLine(sb, "KawaiiPosing Component", KawaiiComponentTypeName);
+        AppendTypeLine(sb, "PosingSystem Component", PosingSystemComponentTypeName);
+        AppendTypeLine(sb, "PosingSystem Preset Defines", PosingSystemPresetDefinesTypeName);
         AppendTypeLine(sb, "PosingSystem Official AddPrefab", PosingSystemMenuItemsTypeName);
         AppendTypeLine(sb, "RedNight NadeSystem", NadeSettingsTypeName);
 
@@ -1721,19 +1738,23 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return false;
     }
 
-    private bool ShouldSkipKawaiiOfficialDialog(int totalTargetCount)
+    private void InstallKawaiiPose(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply)
     {
-        if (kawaiiPoseDialogPolicy == KawaiiPoseDialogPolicy.AlwaysShow)
-            return false;
-        if (kawaiiPoseDialogPolicy == KawaiiPoseDialogPolicy.AlwaysSkip)
-            return true;
-
-        return targetMode == TargetMode.SelectedProjectFolderPrefabs
-            || targetMode == TargetMode.AllProjectPrefabs
-            || totalTargetCount >= 2;
+        switch (kawaiiPoseInstallBehavior)
+        {
+            case KawaiiPoseInstallBehavior.OfficialWithDialogs:
+                InstallKawaiiOfficial(sb, avatarRoot, prefabName, apply);
+                return;
+            case KawaiiPoseInstallBehavior.PrefabOnly:
+                InstallKawaiiPrefabOnly(sb, avatarRoot, prefabName, apply);
+                return;
+            default:
+                InstallKawaiiPresetAutoSkipPrebuild(sb, avatarRoot, prefabName, apply);
+                return;
+        }
     }
 
-    private void InstallKawaiiOfficial(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply, bool skipOfficialDialogs)
+    private void InstallKawaiiOfficial(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply)
     {
         var componentType = FindType(KawaiiComponentTypeName);
         if (componentType == null)
@@ -1752,11 +1773,6 @@ public class AkiirayAvatarSetupTool : EditorWindow
             return;
         }
 
-        if (skipOfficialDialogs)
-        {
-            InstallKawaiiSilent(sb, avatarRoot, prefabName, apply);
-            return;
-        }
 
         var menuType = FindType(PosingSystemMenuItemsTypeName);
         var addPrefab = menuType?.GetMethod("AddPrefab", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, null, new[] { typeof(string) }, null);
@@ -1776,7 +1792,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         sb.AppendLine(prefabName + ": [OK] 公式AddPrefabを実行しました。公式ツール側の確認ダイアログが表示される場合があります。");
     }
 
-    private void InstallKawaiiSilent(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply)
+    private void InstallKawaiiPrefabOnly(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply)
     {
         var prefab = FindKawaiiPrefabByExactNameCached(prefabName);
         if (prefab == null)
@@ -1788,7 +1804,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         var prefabPath = AssetDatabase.GetAssetPath(prefab);
         if (!apply)
         {
-            sb.AppendLine(prefabName + ": [DRY] サイレント導入予定。公式確認は表示せず、Prefabのみ追加します。対応アバター用プリセット適用確認とプレビルド確認は行いません。Prefab: " + prefabPath);
+            sb.AppendLine(prefabName + ": [DRY] Prefabのみ追加予定です。対応アバター用プリセット適用とプレビルドは行いません。Prefab: " + prefabPath);
             return;
         }
 
@@ -1801,7 +1817,124 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
         Undo.RegisterCreatedObjectUndo(instanceObj, "Add " + prefabName);
         EditorUtility.SetDirty(instanceObj);
-        sb.AppendLine(prefabName + ": [OK] サイレント導入しました。公式確認は表示せず、Prefabのみ追加しました。対応アバター用プリセット適用確認とプレビルド確認は行っていません。Prefab: " + prefabPath);
+        sb.AppendLine(prefabName + ": [OK] Prefabのみ追加しました。対応アバター用プリセット適用とプレビルドは行っていません。Prefab: " + prefabPath);
+    }
+
+    private void InstallKawaiiPresetAutoSkipPrebuild(StringBuilder sb, GameObject avatarRoot, string prefabName, bool apply)
+    {
+        var componentType = FindType(KawaiiComponentTypeName);
+        if (componentType == null)
+        {
+            sb.AppendLine(prefabName + ": [SKIP] KawaiiPosing type not found");
+            return;
+        }
+
+        bool exists = avatarRoot.GetComponentsInChildren(componentType, true)
+            .OfType<Component>()
+            .Any(c => c.gameObject.name == prefabName);
+
+        if (exists)
+        {
+            sb.AppendLine(prefabName + ": [SKIP] Already installed");
+            return;
+        }
+
+        var prefab = FindKawaiiPrefabByExactNameCached(prefabName);
+        if (prefab == null)
+        {
+            sb.AppendLine(prefabName + ": [SKIP] Prefab not found");
+            return;
+        }
+
+        var presetMatch = FindKawaiiPresetMatch(avatarRoot, prefab);
+        if (!apply)
+        {
+            if (presetMatch != null)
+                sb.AppendLine(prefabName + ": [DRY] Prefabを追加し、対応アバター用プリセット「" + presetMatch.AvatarName + "」を自動適用予定です。プレビルドは実行しません。");
+            else
+                sb.AppendLine(prefabName + ": [DRY] Prefabを追加予定です。対応アバター用プリセットは見つかりませんでした。プレビルドは実行しません。");
+            return;
+        }
+
+        var instanceObj = PrefabUtility.InstantiatePrefab(prefab, avatarRoot.transform) as GameObject;
+        if (instanceObj == null)
+        {
+            sb.AppendLine(prefabName + ": [ERROR] InstantiatePrefab returned null");
+            return;
+        }
+
+        Undo.RegisterCreatedObjectUndo(instanceObj, "Add " + prefabName);
+        EditorUtility.SetDirty(instanceObj);
+
+        if (presetMatch == null)
+        {
+            sb.AppendLine(prefabName + ": [OK] Prefabを追加しました。対応アバター用プリセットは見つかりませんでした。プレビルドは実行していません。");
+            return;
+        }
+
+        try
+        {
+            if (ApplyKawaiiPresetToInstance(instanceObj, presetMatch.Preset, sb))
+                sb.AppendLine(prefabName + ": [OK] Prefabを追加し、対応アバター用プリセット「" + presetMatch.AvatarName + "」を自動適用しました。プレビルドは実行していません。");
+            else
+                sb.AppendLine(prefabName + ": [WARN] Prefabは追加しましたが、対応アバター用プリセットの適用に失敗しました: PosingSystemコンポーネントまたはPresetが見つかりません。");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine(prefabName + ": [WARN] Prefabは追加しましたが、対応アバター用プリセットの適用に失敗しました: " + GetInvocationErrorMessage(ex));
+        }
+    }
+
+    private KawaiiPresetMatch FindKawaiiPresetMatch(GameObject avatarRoot, GameObject targetPrefab)
+    {
+        if (avatarRoot == null || targetPrefab == null)
+            return null;
+
+        var avatarKeys = BuildKawaiiAvatarPresetKeys(avatarRoot);
+        KawaiiPresetMatch nameMatch = null;
+
+        foreach (var definesAsset in GetKawaiiPresetDefinesAssets())
+        {
+            if (definesAsset == null) continue;
+            var so = new SerializedObject(definesAsset);
+            var presetDefines = so.FindProperty("presetDefines");
+            if (presetDefines == null || !presetDefines.isArray) continue;
+
+            for (int i = 0; i < presetDefines.arraySize; i++)
+            {
+                var define = presetDefines.GetArrayElementAtIndex(i);
+                if (!KawaiiPresetDefineContainsPrefab(define.FindPropertyRelative("prefabs"), targetPrefab))
+                    continue;
+
+                var preset = define.FindPropertyRelative("preset")?.objectReferenceValue as Preset;
+                if (preset == null) continue;
+
+                var avatarName = GetStringPropertyValue(define.FindPropertyRelative("avatarName"));
+                if (KawaiiStringArrayContainsAny(define.FindPropertyRelative("prefabsHashes"), avatarKeys.GuidHashes))
+                    return new KawaiiPresetMatch { Preset = preset, AvatarName = string.IsNullOrEmpty(avatarName) ? avatarRoot.name : avatarName, MatchType = "GUID Hash" };
+
+                if (nameMatch == null && KawaiiStringArrayContainsAny(define.FindPropertyRelative("prefabsNames"), avatarKeys.Names))
+                    nameMatch = new KawaiiPresetMatch { Preset = preset, AvatarName = string.IsNullOrEmpty(avatarName) ? avatarRoot.name : avatarName, MatchType = "Name" };
+            }
+        }
+
+        return nameMatch;
+    }
+
+    private bool ApplyKawaiiPresetToInstance(GameObject installedInstance, Preset preset, StringBuilder sb)
+    {
+        var posingSystemType = FindType(PosingSystemComponentTypeName);
+        if (installedInstance == null || preset == null || posingSystemType == null)
+            return false;
+
+        var component = installedInstance.GetComponentInChildren(posingSystemType, true) as Component;
+        if (component == null)
+            return false;
+
+        Undo.RecordObject(component, "Apply Kawaii Pose Preset");
+        preset.ApplyTo(component, new[] { "defines", "overrideDefines" });
+        EditorUtility.SetDirty(component);
+        return true;
     }
 
     private GameObject FindPrefabByExactName(string prefabName)
@@ -1830,6 +1963,132 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return string.IsNullOrEmpty(path)
             ? null
             : AssetDatabase.LoadAssetAtPath<GameObject>(path);
+    }
+
+    private IEnumerable<UnityEngine.Object> GetKawaiiPresetDefinesAssets()
+    {
+        if (kawaiiPresetDefinesCacheReady)
+            return kawaiiPresetDefinesCache;
+
+        kawaiiPresetDefinesCacheReady = true;
+        kawaiiPresetDefinesCache.Clear();
+
+        var presetDefinesType = FindType(PosingSystemPresetDefinesTypeName);
+        var guids = AssetDatabase.FindAssets("t:PosingSystemPresetDefines");
+        foreach (var guid in guids)
+        {
+            var path = AssetDatabase.GUIDToAssetPath(guid);
+            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
+            if (asset == null) continue;
+            if (presetDefinesType != null && !presetDefinesType.IsInstanceOfType(asset)) continue;
+            kawaiiPresetDefinesCache.Add(asset);
+        }
+
+        return kawaiiPresetDefinesCache;
+    }
+
+    private sealed class KawaiiAvatarPresetKeys
+    {
+        public readonly HashSet<string> GuidHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public readonly HashSet<string> Names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private KawaiiAvatarPresetKeys BuildKawaiiAvatarPresetKeys(GameObject avatarRoot)
+    {
+        var keys = new KawaiiAvatarPresetKeys();
+        if (avatarRoot == null)
+            return keys;
+
+        keys.Names.Add(avatarRoot.name);
+        var source = PrefabUtility.GetCorrespondingObjectFromSource(avatarRoot);
+        while (source != null)
+        {
+            keys.Names.Add(source.name);
+            var path = AssetDatabase.GetAssetPath(source);
+            if (!string.IsNullOrEmpty(path))
+            {
+                var guid = AssetDatabase.AssetPathToGUID(path);
+                if (!string.IsNullOrEmpty(guid))
+                    keys.GuidHashes.Add(GetPosingSystemGuidHash(guid));
+            }
+            source = PrefabUtility.GetCorrespondingObjectFromSource(source);
+        }
+
+        var rootPath = AssetDatabase.GetAssetPath(avatarRoot);
+        if (!string.IsNullOrEmpty(rootPath))
+        {
+            var guid = AssetDatabase.AssetPathToGUID(rootPath);
+            if (!string.IsNullOrEmpty(guid))
+                keys.GuidHashes.Add(GetPosingSystemGuidHash(guid));
+        }
+
+        return keys;
+    }
+
+    private bool KawaiiPresetDefineContainsPrefab(SerializedProperty prefabsProperty, GameObject targetPrefab)
+    {
+        if (prefabsProperty == null || !prefabsProperty.isArray || targetPrefab == null)
+            return false;
+
+        var targetPath = AssetDatabase.GetAssetPath(targetPrefab);
+        for (int i = 0; i < prefabsProperty.arraySize; i++)
+        {
+            var obj = prefabsProperty.GetArrayElementAtIndex(i).objectReferenceValue;
+            if (obj == null) continue;
+            if (obj == targetPrefab) return true;
+            if (!string.IsNullOrEmpty(targetPath) && AssetDatabase.GetAssetPath(obj) == targetPath) return true;
+        }
+        return false;
+    }
+
+    private bool KawaiiStringArrayContainsAny(SerializedProperty arrayProperty, HashSet<string> candidates)
+    {
+        if (arrayProperty == null || !arrayProperty.isArray || candidates == null || candidates.Count == 0)
+            return false;
+
+        for (int i = 0; i < arrayProperty.arraySize; i++)
+        {
+            var value = arrayProperty.GetArrayElementAtIndex(i).stringValue;
+            if (!string.IsNullOrEmpty(value) && candidates.Contains(value))
+                return true;
+        }
+        return false;
+    }
+
+    private string GetStringPropertyValue(SerializedProperty property)
+    {
+        return property != null && property.propertyType == SerializedPropertyType.String ? property.stringValue : "";
+    }
+
+    private string GetPosingSystemGuidHash(string guid)
+    {
+        var menuType = FindType(PosingSystemMenuItemsTypeName);
+        var method = menuType?.GetMethod("GetPosingSystemGUIDHash", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, null, new[] { typeof(string) }, null);
+        if (method != null)
+        {
+            try
+            {
+                var result = method.Invoke(null, new object[] { guid }) as string;
+                if (!string.IsNullOrEmpty(result))
+                    return result;
+            }
+            catch
+            {
+                // Fallback below.
+            }
+        }
+
+        return GetPosingSystemGuidHashFallback(guid);
+    }
+
+    private string GetPosingSystemGuidHashFallback(string guid)
+    {
+        const string seed = "_jp.unisakistudio.posingsystem.guihashmaker";
+        using (var md5 = MD5.Create())
+        {
+            var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(guid + seed));
+            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+        }
     }
 
     private void InstallPrefabByName(StringBuilder sb, GameObject avatarRoot, string label, string[] prefabNames, bool apply)
