@@ -80,6 +80,23 @@ public class AkiirayAvatarSetupTool : EditorWindow
         public string MatchType;
     }
 
+    private sealed class KawaiiPoseInstallInfo
+    {
+        public bool HasAny;
+        public bool HasNormal;
+        public bool HasEightBitNoFoot;
+        public List<GameObject> InstalledRoots = new List<GameObject>();
+    }
+
+    private sealed class LightLimitChangerInstallInfo
+    {
+        public bool HasAny;
+        public bool HasV1;
+        public bool HasV2;
+        public bool HasPrefabOnly;
+        public List<GameObject> InstalledRoots = new List<GameObject>();
+    }
+
     private Vector2 scroll;
     private Vector2 dryRunSummaryScroll;
     private string log = "";
@@ -106,8 +123,10 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool addRBS = true;
     private bool addNadeSystem = true;
     private bool addLightLimitChanger = true;
+    private bool reinstallLightLimitChanger = false;
     private bool addKawaiiNormal = false;
     private bool addKawaii8bitNoFoot = true;
+    private bool reinstallKawaiiPose = false;
     private KawaiiPoseInstallMode allInstallKawaiiMode = KawaiiPoseInstallMode.EightBitNoFoot;
     private KawaiiPoseInstallBehavior kawaiiPoseInstallBehavior = KawaiiPoseInstallBehavior.AutoApplyPresetSkipPrebuild;
 
@@ -119,6 +138,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private const string LLCV2ContextMenuTypeName = "io.github.azukimochi.LightLimitChangerContextMenu";
     private const string LLCV1InstallerTypeName = "io.github.azukimochi.LightLimitChanger";
     private const string LLCInstalledObjectName = "Light Limit Changer";
+    private const string KawaiiPoseNormalObjectName = "可愛いポーズ";
+    private const string KawaiiPoseEightBitNoFootObjectName = "可愛いポーズ(8bit・足の高さなし)";
     private static readonly string[] LLCInstalledTypeNames =
     {
         LLCV2ComponentTypeName,
@@ -128,6 +149,11 @@ public class AkiirayAvatarSetupTool : EditorWindow
     {
         LLCInstalledObjectName,
         "LightLimitChanger",
+    };
+    private static readonly string[] KawaiiPosePrefabNames =
+    {
+        KawaiiPoseNormalObjectName,
+        KawaiiPoseEightBitNoFootObjectName,
     };
     private static readonly string[] LLCPrefabPaths =
     {
@@ -425,10 +451,18 @@ public class AkiirayAvatarSetupTool : EditorWindow
             using (new EditorGUILayout.VerticalScope())
             {
                 addLightLimitChanger = EditorGUILayout.ToggleLeft("LightLimitChanger", addLightLimitChanger);
+                using (new EditorGUI.DisabledScope(!addLightLimitChanger))
+                    reinstallLightLimitChanger = EditorGUILayout.ToggleLeft("LightLimitChanger: 既存を削除して入れ直す", reinstallLightLimitChanger);
                 addKawaiiNormal = EditorGUILayout.ToggleLeft("可愛いポーズ", addKawaiiNormal);
                 addKawaii8bitNoFoot = EditorGUILayout.ToggleLeft("可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot);
+                using (new EditorGUI.DisabledScope(!addKawaiiNormal && !addKawaii8bitNoFoot))
+                    reinstallKawaiiPose = EditorGUILayout.ToggleLeft("可愛いポーズ: 既存を削除して入れ直す", reinstallKawaiiPose);
             }
         }
+
+        EditorGUILayout.HelpBox("入れ直しを有効にすると、対象アバター内の既存Prefabを削除してから再導入します。手動調整済みの設定は失われる可能性があります。DryRunで確認してから実行してください。", MessageType.Warning);
+        if (addKawaiiNormal && addKawaii8bitNoFoot)
+            EditorGUILayout.HelpBox("可愛いポーズの「両方」導入は通常版と8bit版を同時に追加します。既存の可愛いポーズ系がある場合、入れ直しOFFでは重複防止のため追加をスキップします。", MessageType.Info);
     }
 
     private KawaiiPoseInstallMode DrawKawaiiPoseInstallModePopup(string label, KawaiiPoseInstallMode value)
@@ -614,8 +648,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         EditorGUILayout.LabelField("RBS", GetRbsAvatarInstallState(avatarRoot));
         EditorGUILayout.LabelField("赤夜式 撫で音", GetAvatarComponentInstallState(avatarRoot, NadeSettingsTypeName));
         EditorGUILayout.LabelField("LightLimitChanger", GetLightLimitChangerAvatarInstallState(avatarRoot));
-        EditorGUILayout.LabelField("可愛いポーズ", GetAvatarKawaiiInstallState(avatarRoot, "可愛いポーズ"));
-        EditorGUILayout.LabelField("可愛いポーズ(8bit・足の高さなし)", GetAvatarKawaiiInstallState(avatarRoot, "可愛いポーズ(8bit・足の高さなし)"));
+        EditorGUILayout.LabelField("可愛いポーズ", GetAvatarKawaiiInstallState(avatarRoot));
         EditorGUILayout.Space(4);
     }
 
@@ -656,16 +689,13 @@ public class AkiirayAvatarSetupTool : EditorWindow
         return FormatAvatarInstallStatus(count > 0) + " / 数: " + count;
     }
 
-    private string GetAvatarKawaiiInstallState(GameObject avatarRoot, string objectName)
+    private string GetAvatarKawaiiInstallState(GameObject avatarRoot)
     {
-        var type = FindType(KawaiiComponentTypeName);
-        if (type == null)
+        if (!IsKawaiiPoseToolAvailable())
             return FormatToolNotInstalledStatus();
 
-        var found = avatarRoot.GetComponentsInChildren(type, true)
-            .OfType<Component>()
-            .Any(c => c.gameObject.name == objectName);
-        return FormatAvatarInstallStatus(found);
+        var info = GetKawaiiPoseInstallInfo(avatarRoot);
+        return FormatAvatarInstallStatus(info.HasAny) + FormatKawaiiPoseInstallSuffix(info);
     }
 
     private string GetRbsAvatarInstallState(GameObject avatarRoot)
@@ -682,7 +712,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         if (variant == LightLimitChangerVariant.NotInstalled)
             return FormatToolNotInstalledStatus();
 
-        return FormatAvatarInstallStatus(HasLightLimitChanger(avatarRoot)) + FormatLightLimitChangerVariantSuffix(variant);
+        return FormatAvatarInstallStatus(GetLightLimitChangerInstallInfo(avatarRoot).HasAny) + FormatLightLimitChangerInstallSuffix(GetLightLimitChangerInstallInfo(avatarRoot));
     }
 
     private string FormatAvatarInstallStatus(bool installed)
@@ -1092,9 +1122,8 @@ public class AkiirayAvatarSetupTool : EditorWindow
             RunInstallOrSkip(sb, avatarRoot, "LAC", addLAC, IsTypeAvailable(LACTypeName), () => InstallLac(sb, avatarRoot, apply));
             RunInstallOrSkip(sb, avatarRoot, "RBS", addRBS, IsRbsToolAvailable(), () => InstallPrefabByName(sb, avatarRoot, "RBS", RBSPrefabNames, apply));
             RunInstallOrSkip(sb, avatarRoot, "赤夜式 撫で音", addNadeSystem, IsTypeAvailable(NadeSettingsTypeName), () => InstallPrefabByName(sb, avatarRoot, "赤夜式 撫で音", new[] { "NadeSystem" }, apply));
-            RunInstallOrSkip(sb, avatarRoot, "LightLimitChanger", addLightLimitChanger, IsLightLimitChangerToolAvailable(), () => InstallLightLimitChangerOfficial(sb, avatarRoot, apply));
-            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ", addKawaiiNormal, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiPose(sb, avatarRoot, "可愛いポーズ", apply));
-            RunInstallOrSkip(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", addKawaii8bitNoFoot, IsTypeAvailable(KawaiiComponentTypeName), () => InstallKawaiiPose(sb, avatarRoot, "可愛いポーズ(8bit・足の高さなし)", apply));
+            RunInstallOrSkip(sb, avatarRoot, "LightLimitChanger", addLightLimitChanger, IsLightLimitChangerToolAvailable(), () => InstallLightLimitChangerWithReinstall(sb, avatarRoot, apply));
+            RunKawaiiPoseInstallFamily(sb, avatarRoot, apply);
 
             if (apply)
             {
@@ -1158,6 +1187,11 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool IsLightLimitChangerToolAvailable()
     {
         return GetLightLimitChangerToolVariant() != LightLimitChangerVariant.NotInstalled;
+    }
+
+    private bool IsKawaiiPoseToolAvailable()
+    {
+        return FindType(KawaiiComponentTypeName) != null || FindType(PosingSystemComponentTypeName) != null || KawaiiPosePrefabNames.Any(name => FindKawaiiPrefabByExactNameCached(name) != null);
     }
 
     private LightLimitChangerVariant GetLightLimitChangerToolVariant()
@@ -1454,19 +1488,10 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void AppendLightLimitChangerStatus(StringBuilder sb, GameObject root)
     {
-        var comps = GetComponentsInChildrenByTypeNames(root, LLCInstalledTypeNames);
-        var nameHits = root.GetComponentsInChildren<Transform>(true)
-            .Where(t => t.name == LLCInstalledObjectName)
-            .Distinct()
-            .ToArray();
-
-        bool installed = comps.Count > 0 || nameHits.Length > 0;
-        sb.AppendLine("LightLimitChanger: " + (installed ? "Installed" : "Not Installed") + " / Component Count: " + comps.Count + " / Name Hit Count: " + nameHits.Length);
-
-        foreach (var c in comps)
-            sb.AppendLine("  - Component: " + c.GetType().FullName + " / " + GetPath(c.transform));
-        foreach (var h in nameHits)
-            sb.AppendLine("  - Name: " + GetPath(h));
+        var info = GetLightLimitChangerInstallInfo(root);
+        sb.AppendLine("LightLimitChanger: " + (info.HasAny ? "Installed" : "Not Installed") + FormatLightLimitChangerInstallSuffix(info) + " / Root Count: " + info.InstalledRoots.Count);
+        foreach (var h in info.InstalledRoots)
+            sb.AppendLine("  - " + GetPath(h.transform));
     }
 
     private List<Component> GetComponentsInChildrenByTypeNames(GameObject root, string[] typeNames)
@@ -1483,22 +1508,18 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void AppendKawaiiStatus(StringBuilder sb, GameObject root)
     {
-        var type = FindType(KawaiiComponentTypeName);
-        if (type == null)
+        if (!IsKawaiiPoseToolAvailable())
         {
             sb.AppendLine("可愛いポーズツール: Tool not installed");
             return;
         }
 
-        var comps = root.GetComponentsInChildren(type, true).OfType<Component>().ToArray();
-        bool normal = comps.Any(c => c.gameObject.name == "可愛いポーズ");
-        bool eight = comps.Any(c => c.gameObject.name == "可愛いポーズ(8bit・足の高さなし)");
-
-        sb.AppendLine("可愛いポーズツール: " + (comps.Length > 0 ? "Installed" : "Not Installed") + " / Count: " + comps.Length);
-        foreach (var c in comps)
-            sb.AppendLine("  - " + GetPath(c.transform));
-        sb.AppendLine("  可愛いポーズ: " + (normal ? "Found" : "Not Found"));
-        sb.AppendLine("  可愛いポーズ(8bit・足の高さなし): " + (eight ? "Found" : "Not Found"));
+        var info = GetKawaiiPoseInstallInfo(root);
+        sb.AppendLine("可愛いポーズツール: " + (info.HasAny ? "Installed" : "Not Installed") + FormatKawaiiPoseInstallSuffix(info) + " / Root Count: " + info.InstalledRoots.Count);
+        foreach (var h in info.InstalledRoots)
+            sb.AppendLine("  - " + GetPath(h.transform));
+        sb.AppendLine("  可愛いポーズ: " + (info.HasNormal ? "Found" : "Not Found"));
+        sb.AppendLine("  可愛いポーズ(8bit・足の高さなし): " + (info.HasEightBitNoFoot ? "Found" : "Not Found"));
     }
 
     private void InstallComponent(StringBuilder sb, GameObject avatarRoot, string label, string typeName, bool apply, Action<Component> configure)
@@ -1590,9 +1611,36 @@ public class AkiirayAvatarSetupTool : EditorWindow
         sb.AppendLine("LAC: [OK] Preset=" + presetName);
     }
 
+    private void InstallLightLimitChangerWithReinstall(StringBuilder sb, GameObject avatarRoot, bool apply)
+    {
+        var info = GetLightLimitChangerInstallInfo(avatarRoot);
+        if (info.HasAny && !reinstallLightLimitChanger)
+        {
+            sb.AppendLine("LightLimitChanger: [SKIP] 既に導入済みです。");
+            return;
+        }
+
+        if (info.HasAny && reinstallLightLimitChanger)
+        {
+            var count = info.InstalledRoots.Distinct().Count();
+            if (!apply)
+            {
+                sb.AppendLine("LightLimitChanger: [DRY] 既存のLightLimitChanger系Prefab " + count + "件を削除し、再導入予定です。");
+                AppendLightLimitChangerDryInstallPlan(sb, avatarRoot);
+                return;
+            }
+            else
+                RemoveLightLimitChangerInstallations(avatarRoot, true, sb);
+        }
+
+        InstallLightLimitChangerOfficial(sb, avatarRoot, apply);
+        if (info.HasAny && reinstallLightLimitChanger)
+            sb.AppendLine("LightLimitChanger: " + (apply ? "[OK] 再導入しました。" : "[DRY] 再導入予定です。"));
+    }
+
     private void InstallLightLimitChangerOfficial(StringBuilder sb, GameObject avatarRoot, bool apply)
     {
-        if (HasLightLimitChanger(avatarRoot))
+        if (GetLightLimitChangerInstallInfo(avatarRoot).HasAny)
         {
             sb.AppendLine("LightLimitChanger: [SKIP] Already installed");
             return;
@@ -1628,6 +1676,67 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
 
         InstallLightLimitChangerPrefabFallback(sb, avatarRoot, apply);
+    }
+
+    private void AppendLightLimitChangerDryInstallPlan(StringBuilder sb, GameObject avatarRoot)
+    {
+        if (FindLightLimitChangerV2SetupMethod() != null)
+        {
+            sb.AppendLine("LightLimitChanger: [DRY] Call official Setup() with avatar selected (V2 style)");
+            return;
+        }
+        if (FindLightLimitChangerV1ApplyMethod() != null)
+        {
+            sb.AppendLine("LightLimitChanger: [DRY] Call ApplytoAvatar(MenuCommand) with avatar selected (V1 style)");
+            return;
+        }
+
+        InstallLightLimitChangerPrefabFallback(sb, avatarRoot, false);
+    }
+
+    private void RunKawaiiPoseInstallFamily(StringBuilder sb, GameObject avatarRoot, bool apply)
+    {
+        bool selected = addKawaiiNormal || addKawaii8bitNoFoot;
+        if (!selected)
+        {
+            sb.AppendLine("可愛いポーズ: [SKIP] 導入未選択");
+            return;
+        }
+
+        if (!IsKawaiiPoseToolAvailable())
+        {
+            sb.AppendLine("可愛いポーズ: [SKIP] ツール未導入");
+            return;
+        }
+
+        var info = GetKawaiiPoseInstallInfo(avatarRoot);
+        if (info.HasAny && !reinstallKawaiiPose)
+        {
+            var names = new List<string>();
+            if (addKawaiiNormal) names.Add(KawaiiPoseNormalObjectName);
+            if (addKawaii8bitNoFoot) names.Add(KawaiiPoseEightBitNoFootObjectName);
+            sb.AppendLine(string.Join(" / ", names) + ": [SKIP] 可愛いポーズ系が既に導入済みです。入れ替える場合は「可愛いポーズを入れ直す」を有効にしてください。");
+            return;
+        }
+
+        if (info.HasAny && reinstallKawaiiPose)
+        {
+            RemoveKawaiiPoseInstallations(avatarRoot, apply, sb);
+            if (!apply)
+            {
+                sb.AppendLine("可愛いポーズ: [DRY] 選択された可愛いポーズ系Prefabを再導入予定です。");
+                if (addKawaiiNormal)
+                    AppendKawaiiPoseDryInstallPlan(sb, avatarRoot, KawaiiPoseNormalObjectName);
+                if (addKawaii8bitNoFoot)
+                    AppendKawaiiPoseDryInstallPlan(sb, avatarRoot, KawaiiPoseEightBitNoFootObjectName);
+                return;
+            }
+        }
+
+        if (addKawaiiNormal)
+            InstallKawaiiPose(sb, avatarRoot, KawaiiPoseNormalObjectName, apply);
+        if (addKawaii8bitNoFoot)
+            InstallKawaiiPose(sb, avatarRoot, KawaiiPoseEightBitNoFootObjectName, apply);
     }
 
     private bool TryInvokeLightLimitChangerSetup(StringBuilder sb, GameObject avatarRoot, MethodInfo method, object[] parameters, string label)
@@ -1713,17 +1822,147 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private static bool HasLightLimitChanger(GameObject avatarRoot)
     {
-        if (avatarRoot == null) return false;
+        return GetLightLimitChangerInstallInfo(avatarRoot).HasAny;
+    }
 
-        foreach (var typeName in LLCInstalledTypeNames)
+    private static LightLimitChangerInstallInfo GetLightLimitChangerInstallInfo(GameObject avatarRoot)
+    {
+        var info = new LightLimitChangerInstallInfo();
+        if (avatarRoot == null) return info;
+
+        AddInstallRootsForType(avatarRoot, LLCV1SettingsTypeName, info.InstalledRoots, () => info.HasV1 = true);
+        AddInstallRootsForType(avatarRoot, LLCV2ComponentTypeName, info.InstalledRoots, () => info.HasV2 = true);
+
+        foreach (var t in avatarRoot.GetComponentsInChildren<Transform>(true))
         {
-            var type = FindType(typeName);
-            if (type != null && avatarRoot.GetComponentsInChildren(type, true).Length > 0)
-                return true;
+            if (!LLCPrefabNames.Contains(t.name)) continue;
+            info.HasPrefabOnly = true;
+            info.InstalledRoots.Add(ResolveInstalledRoot(avatarRoot, t.gameObject));
         }
 
-        return avatarRoot.GetComponentsInChildren<Transform>(true)
-            .Any(t => t.name == LLCInstalledObjectName || LLCPrefabNames.Contains(t.name));
+        info.InstalledRoots = info.InstalledRoots.Where(o => o != null).Distinct().ToList();
+        info.HasAny = info.HasV1 || info.HasV2 || info.HasPrefabOnly || info.InstalledRoots.Count > 0;
+        if (info.HasAny && !info.HasV1 && !info.HasV2)
+            info.HasPrefabOnly = true;
+        return info;
+    }
+
+    private static KawaiiPoseInstallInfo GetKawaiiPoseInstallInfo(GameObject avatarRoot)
+    {
+        var info = new KawaiiPoseInstallInfo();
+        if (avatarRoot == null) return info;
+
+        var kawaiiType = FindType(KawaiiComponentTypeName);
+        if (kawaiiType != null)
+        {
+            foreach (var c in avatarRoot.GetComponentsInChildren(kawaiiType, true).OfType<Component>())
+                AddKawaiiPoseRoot(avatarRoot, info, c.gameObject);
+        }
+
+        var posingType = FindType(PosingSystemComponentTypeName);
+        if (posingType != null)
+        {
+            foreach (var c in avatarRoot.GetComponentsInChildren(posingType, true).OfType<Component>())
+                if (KawaiiPosePrefabNames.Contains(c.gameObject.name))
+                    AddKawaiiPoseRoot(avatarRoot, info, c.gameObject);
+        }
+
+        foreach (var t in avatarRoot.GetComponentsInChildren<Transform>(true))
+            if (KawaiiPosePrefabNames.Contains(t.name))
+                AddKawaiiPoseRoot(avatarRoot, info, t.gameObject);
+
+        info.InstalledRoots = info.InstalledRoots.Where(o => o != null).Distinct().ToList();
+        info.HasAny = info.HasNormal || info.HasEightBitNoFoot || info.InstalledRoots.Count > 0;
+        return info;
+    }
+
+    private static void AddInstallRootsForType(GameObject avatarRoot, string typeName, List<GameObject> roots, Action mark)
+    {
+        var type = FindType(typeName);
+        if (type == null) return;
+
+        foreach (var c in avatarRoot.GetComponentsInChildren(type, true).OfType<Component>())
+        {
+            mark?.Invoke();
+            roots.Add(ResolveInstalledRoot(avatarRoot, c.gameObject));
+        }
+    }
+
+    private static void AddKawaiiPoseRoot(GameObject avatarRoot, KawaiiPoseInstallInfo info, GameObject obj)
+    {
+        if (obj == null) return;
+        if (obj.name == KawaiiPoseNormalObjectName)
+            info.HasNormal = true;
+        if (obj.name == KawaiiPoseEightBitNoFootObjectName)
+            info.HasEightBitNoFoot = true;
+        info.InstalledRoots.Add(ResolveInstalledRoot(avatarRoot, obj));
+    }
+
+    private static GameObject ResolveInstalledRoot(GameObject avatarRoot, GameObject obj)
+    {
+        if (avatarRoot == null || obj == null)
+            return obj;
+
+        var prefabRoot = PrefabUtility.GetNearestPrefabInstanceRoot(obj);
+        if (prefabRoot != null
+            && prefabRoot != avatarRoot
+            && prefabRoot.transform.IsChildOf(avatarRoot.transform))
+        {
+            return prefabRoot;
+        }
+
+        return obj;
+    }
+
+    private int RemoveKawaiiPoseInstallations(GameObject avatarRoot, bool apply, StringBuilder sb)
+    {
+        var roots = GetKawaiiPoseInstallInfo(avatarRoot).InstalledRoots.Where(o => o != null).Distinct().ToList();
+        if (roots.Count == 0) return 0;
+
+        if (!apply)
+        {
+            sb.AppendLine("可愛いポーズ: [DRY] 既存の可愛いポーズ系Prefab " + roots.Count + "件を削除予定です。");
+            return roots.Count;
+        }
+
+        foreach (var root in roots)
+            Undo.DestroyObjectImmediate(root);
+        sb.AppendLine("可愛いポーズ: [OK] 既存の可愛いポーズ系Prefab " + roots.Count + "件を削除しました。");
+        return roots.Count;
+    }
+
+    private int RemoveLightLimitChangerInstallations(GameObject avatarRoot, bool apply, StringBuilder sb)
+    {
+        var roots = GetLightLimitChangerInstallInfo(avatarRoot).InstalledRoots.Where(o => o != null).Distinct().ToList();
+        if (roots.Count == 0) return 0;
+
+        if (!apply)
+        {
+            sb.AppendLine("LightLimitChanger: [DRY] 既存のLightLimitChanger系Prefab " + roots.Count + "件を削除予定です。");
+            return roots.Count;
+        }
+
+        foreach (var root in roots)
+            Undo.DestroyObjectImmediate(root);
+        sb.AppendLine("LightLimitChanger: [OK] 既存のLightLimitChanger系Prefab " + roots.Count + "件を削除しました。");
+        return roots.Count;
+    }
+
+    private string FormatKawaiiPoseInstallSuffix(KawaiiPoseInstallInfo info)
+    {
+        if (info.HasNormal && info.HasEightBitNoFoot) return "（通常 + 8bit）";
+        if (info.HasNormal) return "（通常）";
+        if (info.HasEightBitNoFoot) return "（8bit）";
+        return info.HasAny ? "（Prefabのみ/種別不明）" : "";
+    }
+
+    private string FormatLightLimitChangerInstallSuffix(LightLimitChangerInstallInfo info)
+    {
+        var parts = new List<string>();
+        if (info.HasV1) parts.Add("V1");
+        if (info.HasV2) parts.Add("V2");
+        if (info.HasPrefabOnly) parts.Add("Prefabのみ");
+        return parts.Count > 0 ? "（" + string.Join(" + ", parts) + "）" : "";
     }
 
     private bool PrefabHasAnyComponentType(GameObject prefab, string[] typeNames)
@@ -1751,6 +1990,32 @@ public class AkiirayAvatarSetupTool : EditorWindow
             default:
                 InstallKawaiiPresetAutoSkipPrebuild(sb, avatarRoot, prefabName, apply);
                 return;
+        }
+    }
+
+    private void AppendKawaiiPoseDryInstallPlan(StringBuilder sb, GameObject avatarRoot, string prefabName)
+    {
+        switch (kawaiiPoseInstallBehavior)
+        {
+            case KawaiiPoseInstallBehavior.OfficialWithDialogs:
+                sb.AppendLine(prefabName + ": [DRY] 公式AddPrefabを実行予定。対応アバター用プリセット適用確認やプレビルド確認が表示される場合があります。");
+                return;
+            case KawaiiPoseInstallBehavior.PrefabOnly:
+                {
+                    var prefab = FindKawaiiPrefabByExactNameCached(prefabName);
+                    sb.AppendLine(prefabName + ": [DRY] Prefabのみ追加予定です。対応アバター用プリセット適用とプレビルドは行いません。" + (prefab != null ? " Prefab: " + AssetDatabase.GetAssetPath(prefab) : ""));
+                    return;
+                }
+            default:
+                {
+                    var prefab = FindKawaiiPrefabByExactNameCached(prefabName);
+                    var presetMatch = FindKawaiiPresetMatch(avatarRoot, prefab);
+                    if (presetMatch != null)
+                        sb.AppendLine(prefabName + ": [DRY] Prefabを追加し、対応アバター用プリセット「" + presetMatch.AvatarName + "」を自動適用予定です。プレビルドは実行しません。");
+                    else
+                        sb.AppendLine(prefabName + ": [DRY] Prefabを追加予定です。対応アバター用プリセットは見つかりませんでした。プレビルドは実行しません。");
+                    return;
+                }
         }
     }
 
