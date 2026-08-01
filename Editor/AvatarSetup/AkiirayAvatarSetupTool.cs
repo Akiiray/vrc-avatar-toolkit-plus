@@ -114,6 +114,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool targetCacheDirty = true;
     private bool lastTargetScanCanceled = false;
     private readonly Dictionary<string, string> kawaiiPrefabPathCache = new Dictionary<string, string>();
+    private readonly Dictionary<string, GameObject> nadePrefabCache = new Dictionary<string, GameObject>();
     private readonly List<UnityEngine.Object> kawaiiPresetDefinesCache = new List<UnityEngine.Object>();
     private bool kawaiiPresetDefinesCacheReady = false;
 
@@ -122,6 +123,14 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private LacPresetMode lacPreset = LacPresetMode.HighQuality;
     private bool addRBS = true;
     private bool addNadeSystem = true;
+    private bool installNadeShadowForHands = true;
+    private bool installNadeShadowForFeet = true;
+    private bool installNadeShadowForHead = false;
+    private bool installNadeSphere = false;
+    private bool installNadeFootSystem = false;
+    private bool reinstallNadeSystem = false;
+    private float nadeContactRadius = DefaultNadeContactRadius;
+    private float nadeHeadOffsetY = DefaultNadeHeadOffsetY;
     private bool addLightLimitChanger = true;
     private bool reinstallLightLimitChanger = false;
     private bool addKawaiiNormal = false;
@@ -165,6 +174,16 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private const string PosingSystemComponentTypeName = "jp.unisakistudio.posingsystem.PosingSystem";
     private const string PosingSystemPresetDefinesTypeName = "jp.unisakistudio.posingsystemeditor.PosingSystemPresetDefines";
     private const string NadeSettingsTypeName = "RedNightWorks.NadeSystem.NadeSystemSettings";
+    private const float DefaultNadeContactRadius = 0.14f;
+    private const float DefaultNadeHeadOffsetY = 0.035f;
+    private const string NadeSystemGUID = "491c3f399da5d064d9966982ddf0d191";
+    private const string FootSystemGUID = "ca3cfa8587af6cc4f8f7205a0c16e108";
+    private const string FootSystemMenuGUID = "f7ce8e50badf67b418b0c9d5b7e73442";
+    private const string NadeShadowGUID = "fd1d0e8cc6fc6f646ad9f24b156a31ac";
+    private const string DummyLightGUID = "c46c6e537bbb1a140957ad83f15c5afb";
+    private const string NadeShadowMenuGUID = "7f6a3a1aa3e98df4e88571c89d365603";
+    private const string NadeSphereGUID = "e6971546677df8d449b746136433e2cc";
+    private const string NadeSphereMenuGUID = "4912f408e5d621d43a4d48dd368e3c3a";
     private static readonly string[] RBSPrefabNames =
     {
         "RBS_Suimin(日本語)",
@@ -201,6 +220,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void OnEnable()
     {
+        nadePrefabCache.Clear();
         InitializeHierarchySlotsFromSelectionIfNeeded();
     }
 
@@ -334,7 +354,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 new { Name = "AAO", Status = GetTypeToolDependencyState(AAOTypeName) },
                 new { Name = "LAC", Status = GetTypeToolDependencyState(LACTypeName) },
                 new { Name = "RBS", Status = GetPrefabToolDependencyState(RBSPrefabNames) },
-                new { Name = "赤夜式 撫で音", Status = GetTypeToolDependencyState(NadeSettingsTypeName) },
+                new { Name = "赤夜式 撫で音", Status = FormatToolDependencyStatus(IsNadeSystemToolAvailable()) },
                 new { Name = "LightLimitChanger", Status = GetLightLimitChangerDependencyState() },
                 new { Name = "可愛いポーズ", Status = GetTypeToolDependencyState(KawaiiComponentTypeName) },
             };
@@ -461,6 +481,21 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
 
         EditorGUILayout.HelpBox("入れ直しを有効にすると、対象アバター内の既存Prefabを削除してから再導入します。手動調整済みの設定は失われる可能性があります。DryRunで確認してから実行してください。", MessageType.Warning);
+        if (addNadeSystem)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("赤夜式 撫で音ギミック設定", EditorStyles.boldLabel);
+            installNadeShadowForHands = EditorGUILayout.ToggleLeft("手へ影シェーダーを導入", installNadeShadowForHands);
+            installNadeShadowForHead = EditorGUILayout.ToggleLeft("頭へ影シェーダーを導入", installNadeShadowForHead);
+            installNadeFootSystem = EditorGUILayout.ToggleLeft("足へ撫で音ギミックを導入", installNadeFootSystem);
+            using (new EditorGUI.DisabledScope(!installNadeFootSystem))
+                installNadeShadowForFeet = EditorGUILayout.ToggleLeft("足へ影シェーダーを導入", installNadeShadowForFeet);
+            installNadeSphere = EditorGUILayout.ToggleLeft("カメラ撫でスフィアを導入", installNadeSphere);
+            nadeContactRadius = EditorGUILayout.Slider("Contact Radius", nadeContactRadius, 0.01f, 1.0f);
+            nadeHeadOffsetY = EditorGUILayout.FloatField("Contact Offset Y", nadeHeadOffsetY);
+            reinstallNadeSystem = EditorGUILayout.ToggleLeft("赤夜式 撫で音を削除して入れ直す", reinstallNadeSystem);
+            EditorGUILayout.HelpBox("赤夜式 撫で音の公式Installer相当の設定です。入れ直しを有効にすると既存のNadeSystemを削除して再導入します。手動調整済みの設定は失われる可能性があります。DryRunで確認してから実行してください。", MessageType.Warning);
+        }
         if (addKawaiiNormal && addKawaii8bitNoFoot)
             EditorGUILayout.HelpBox("可愛いポーズの「両方」導入は通常版と8bit版を同時に追加します。既存の可愛いポーズ系がある場合、入れ直しOFFでは重複防止のため追加をスキップします。", MessageType.Info);
     }
@@ -552,7 +587,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         EditorGUILayout.LabelField("AAO", GetTypeToolDependencyState(AAOTypeName));
         EditorGUILayout.LabelField("LAC", GetTypeToolDependencyState(LACTypeName));
         EditorGUILayout.LabelField("RBS", GetPrefabToolDependencyState(RBSPrefabNames));
-        EditorGUILayout.LabelField("赤夜式 撫で音", GetTypeToolDependencyState(NadeSettingsTypeName));
+        EditorGUILayout.LabelField("赤夜式 撫で音", FormatToolDependencyStatus(IsNadeSystemToolAvailable()));
         EditorGUILayout.LabelField("LightLimitChanger", GetLightLimitChangerDependencyState());
         EditorGUILayout.LabelField("可愛いポーズ", GetTypeToolDependencyState(KawaiiComponentTypeName));
     }
@@ -646,7 +681,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         EditorGUILayout.LabelField("AAO", GetAvatarComponentInstallState(avatarRoot, AAOTypeName));
         EditorGUILayout.LabelField("LAC", GetAvatarComponentInstallState(avatarRoot, LACTypeName));
         EditorGUILayout.LabelField("RBS", GetRbsAvatarInstallState(avatarRoot));
-        EditorGUILayout.LabelField("赤夜式 撫で音", GetAvatarComponentInstallState(avatarRoot, NadeSettingsTypeName));
+        EditorGUILayout.LabelField("赤夜式 撫で音", GetAvatarNadeInstallState(avatarRoot));
         EditorGUILayout.LabelField("LightLimitChanger", GetLightLimitChangerAvatarInstallState(avatarRoot));
         EditorGUILayout.LabelField("可愛いポーズ", GetAvatarKawaiiInstallState(avatarRoot));
         EditorGUILayout.Space(4);
@@ -687,6 +722,15 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
         var count = avatarRoot.GetComponentsInChildren(type, true).Length;
         return FormatAvatarInstallStatus(count > 0) + " / 数: " + count;
+    }
+
+    private string GetAvatarNadeInstallState(GameObject avatarRoot)
+    {
+        if (!IsNadeSystemToolAvailable()) return FormatToolNotInstalledStatus();
+        var installed = avatarRoot.GetComponentsInChildren<Transform>(true).Any(t => t.name == "NadeSystem");
+        var type = FindType(NadeSettingsTypeName);
+        if (!installed && type != null) installed = avatarRoot.GetComponentsInChildren(type, true).Length > 0;
+        return FormatAvatarInstallStatus(installed);
     }
 
     private string GetAvatarKawaiiInstallState(GameObject avatarRoot)
@@ -1121,7 +1165,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
             RunInstallOrSkip(sb, avatarRoot, "AAO", addAAO, IsTypeAvailable(AAOTypeName), () => InstallComponent(sb, avatarRoot, "AAO", AAOTypeName, apply, null));
             RunInstallOrSkip(sb, avatarRoot, "LAC", addLAC, IsTypeAvailable(LACTypeName), () => InstallLac(sb, avatarRoot, apply));
             RunInstallOrSkip(sb, avatarRoot, "RBS", addRBS, IsRbsToolAvailable(), () => InstallPrefabByName(sb, avatarRoot, "RBS", RBSPrefabNames, apply));
-            RunInstallOrSkip(sb, avatarRoot, "赤夜式 撫で音", addNadeSystem, IsTypeAvailable(NadeSettingsTypeName), () => InstallPrefabByName(sb, avatarRoot, "赤夜式 撫で音", new[] { "NadeSystem" }, apply));
+            RunInstallOrSkip(sb, avatarRoot, "赤夜式 撫で音", addNadeSystem, IsNadeSystemToolAvailable(), () => InstallNadeSystemWithOptions(sb, avatarRoot, apply));
             RunInstallOrSkip(sb, avatarRoot, "LightLimitChanger", addLightLimitChanger, IsLightLimitChangerToolAvailable(), () => InstallLightLimitChangerWithReinstall(sb, avatarRoot, apply));
             RunKawaiiPoseInstallFamily(sb, avatarRoot, apply);
 
@@ -1182,6 +1226,11 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool IsRbsToolAvailable()
     {
         return FindPrefabByNames(RBSPrefabNames) != null;
+    }
+
+    private bool IsNadeSystemToolAvailable()
+    {
+        return FindType(NadeSettingsTypeName) != null || FindNadePrefab(NadeSystemGUID, "NadeSystem") != null;
     }
 
     private bool IsLightLimitChangerToolAvailable()
@@ -1431,7 +1480,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
         AppendComponentStatus(sb, avatarRoot, "AAO", AAOTypeName);
         AppendLacStatus(sb, avatarRoot);
         AppendRbsStatus(sb, avatarRoot);
-        AppendComponentStatus(sb, avatarRoot, "赤夜式 撫で音", NadeSettingsTypeName);
+        AppendNadeStatus(sb, avatarRoot);
         AppendLightLimitChangerStatus(sb, avatarRoot);
         AppendKawaiiStatus(sb, avatarRoot);
     }
@@ -1449,6 +1498,16 @@ public class AkiirayAvatarSetupTool : EditorWindow
         sb.AppendLine(label + ": " + (comps.Length > 0 ? "Installed" : "Not Installed") + " / Count: " + comps.Length);
         foreach (var c in comps)
             sb.AppendLine("  - " + GetPath(c.transform));
+    }
+
+    private void AppendNadeStatus(StringBuilder sb, GameObject root)
+    {
+        if (!IsNadeSystemToolAvailable()) { sb.AppendLine("赤夜式 撫で音: Tool not installed"); return; }
+        var nadeSystems = root.GetComponentsInChildren<Transform>(true).Where(t => t.name == "NadeSystem").ToArray();
+        var installed = nadeSystems.Length > 0;
+        var type = FindType(NadeSettingsTypeName);
+        if (!installed && type != null) installed = root.GetComponentsInChildren(type, true).Length > 0;
+        sb.AppendLine("赤夜式 撫で音: " + (installed ? "Installed" : "Not Installed") + " / NadeSystem Count: " + nadeSystems.Length);
     }
 
     private void AppendLacStatus(StringBuilder sb, GameObject root)
@@ -2355,6 +2414,182 @@ public class AkiirayAvatarSetupTool : EditorWindow
             return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
         }
     }
+
+    private void InstallNadeSystemWithOptions(StringBuilder sb, GameObject avatarRoot, bool apply)
+    {
+        var existing = avatarRoot.GetComponentsInChildren<Transform>(true).FirstOrDefault(t => t.name == "NadeSystem");
+        if (existing != null && !reinstallNadeSystem)
+        {
+            sb.AppendLine("赤夜式 撫で音: [SKIP] 既にNadeSystemが導入済みです。設定を変更する場合は「赤夜式 撫で音を削除して入れ直す」を有効にしてください。");
+            return;
+        }
+
+        var nadePrefab = FindNadePrefab(NadeSystemGUID, "NadeSystem");
+        if (nadePrefab == null)
+        {
+            sb.AppendLine("赤夜式 撫で音: [ERROR] NadeSystem Prefabが見つかりません。");
+            return;
+        }
+
+        if (!apply)
+        {
+            if (existing != null) sb.AppendLine("赤夜式 撫で音: [DRY] 既存のNadeSystemを削除して再導入予定です。");
+            sb.AppendLine("赤夜式 撫で音: [DRY] NadeSystem Prefabを追加予定です。");
+            sb.AppendLine(string.Format("赤夜式 撫で音: [DRY] Contact Radius={0}, Contact Offset Y={1} を適用予定です。", nadeContactRadius, nadeHeadOffsetY));
+            sb.AppendLine("赤夜式 撫で音: [DRY] FootSystem: " + (installNadeFootSystem ? "ON（FootSystem と FootSystemMenu を追加予定）" : "OFF"));
+            sb.AppendLine(string.Format("赤夜式 撫で音: [DRY] 影シェーダー: 手={0}, 頭={1}, 足={2}", OnOff(installNadeShadowForHands), OnOff(installNadeShadowForHead), OnOff(installNadeFootSystem && installNadeShadowForFeet)));
+            sb.AppendLine("赤夜式 撫で音: [DRY] カメラ撫でスフィア: " + OnOff(installNadeSphere));
+            return;
+        }
+
+        if (existing != null)
+        {
+            Undo.DestroyObjectImmediate(existing.gameObject);
+            sb.AppendLine("赤夜式 撫で音: [OK] 既存のNadeSystemを削除しました。");
+        }
+
+        var nadeSystem = InstantiateNadePrefab(nadePrefab, avatarRoot.transform, sb, "NadeSystem");
+        if (nadeSystem == null) return;
+        sb.AppendLine("赤夜式 撫で音: [OK] NadeSystem Prefabを追加しました。");
+
+        var rxHeadMain = RequireNadeTransform(sb, nadeSystem.transform, "RxHeadMain");
+        var headSystem = RequireNadeTransform(sb, nadeSystem.transform, "HeadSystem");
+        var rightHand = RequireNadeTransform(sb, nadeSystem.transform, "RightHandSystem");
+        var leftHand = RequireNadeTransform(sb, nadeSystem.transform, "LeftHandSystem");
+        var exMenu = RequireNadeTransform(sb, nadeSystem.transform, "ExMenu");
+        var nadeControl = RequireNadeTransform(sb, nadeSystem.transform, "ExMenu/Nade Control");
+
+        ApplyNadeContactSettings(sb, avatarRoot, rxHeadMain, headSystem);
+
+        GameObject footSystem = null;
+        if (installNadeFootSystem)
+        {
+            footSystem = InstantiateNadePrefab(FindNadePrefab(FootSystemGUID, "FootSystem"), nadeSystem.transform, sb, "FootSystem");
+            var footMenu = InstantiateNadePrefab(FindNadePrefab(FootSystemMenuGUID, "FootSystemMenu"), nadeControl, sb, "FootSystemMenu");
+            if (footSystem != null && footMenu != null) sb.AppendLine("赤夜式 撫で音: [OK] FootSystem と FootSystemMenu を追加しました。");
+        }
+
+        var shadowPrefab = FindNadePrefab(NadeShadowGUID, "NadeShadow");
+        int shadowCount = 0;
+        if (installNadeShadowForHands)
+        {
+            if (InstantiateNadePrefab(shadowPrefab, rightHand, sb, "NadeShadow（右手）") != null) shadowCount++;
+            if (InstantiateNadePrefab(shadowPrefab, leftHand, sb, "NadeShadow（左手）") != null) shadowCount++;
+        }
+        if (installNadeShadowForHead && InstantiateNadePrefab(shadowPrefab, headSystem, sb, "NadeShadow（頭）") != null) shadowCount++;
+        if (installNadeFootSystem && installNadeShadowForFeet && footSystem != null)
+        {
+            var rightFoot = RequireNadeTransform(sb, footSystem.transform, "RightFootSystem/RxRightFoot");
+            var leftFoot = RequireNadeTransform(sb, footSystem.transform, "LeftFootSystem/RxLeftFoot");
+            if (InstantiateNadePrefab(shadowPrefab, rightFoot, sb, "NadeShadow（右足）") != null) shadowCount++;
+            if (InstantiateNadePrefab(shadowPrefab, leftFoot, sb, "NadeShadow（左足）") != null) shadowCount++;
+        }
+        if (shadowCount > 0)
+        {
+            InstantiateNadePrefab(FindNadePrefab(DummyLightGUID, "DummyLight"), nadeSystem.transform, sb, "DummyLight");
+            InstantiateNadePrefab(FindNadePrefab(NadeShadowMenuGUID, "NadeShadowMenu"), exMenu, sb, "NadeShadowMenu");
+            sb.AppendLine(string.Format("赤夜式 撫で音: [OK] 影シェーダーを追加しました（手: {0}, 頭: {1}, 足: {2}）。", OnOff(installNadeShadowForHands), OnOff(installNadeShadowForHead), OnOff(installNadeFootSystem && installNadeShadowForFeet)));
+        }
+
+        if (installNadeSphere)
+        {
+            var sphere = InstantiateNadePrefab(FindNadePrefab(NadeSphereGUID, "NadeSphere"), nadeSystem.transform, sb, "NadeSphere");
+            var sphereMenu = InstantiateNadePrefab(FindNadePrefab(NadeSphereMenuGUID, "NadeSphereMenu"), nadeControl, sb, "NadeSphereMenu");
+            if (sphere != null && sphereMenu != null) sb.AppendLine("赤夜式 撫で音: [OK] カメラ撫でスフィアを追加しました。");
+        }
+
+        if (headSystem != null)
+        {
+            Undo.RecordObject(headSystem.gameObject, "Initialize Nade HeadSystem");
+            headSystem.gameObject.SetActive(false);
+            sb.AppendLine("赤夜式 撫で音: [OK] HeadSystemを初期状態に戻しました。");
+        }
+    }
+
+    private void ApplyNadeContactSettings(StringBuilder sb, GameObject avatarRoot, Transform rxHeadMain, Transform headSystem)
+    {
+        if (rxHeadMain == null || headSystem == null) return;
+        var receiverType = FindType("VRC.SDK3.Dynamics.Contact.Components.VRCContactReceiver");
+        var receiver = receiverType != null ? rxHeadMain.GetComponent(receiverType) : null;
+        bool radiusSet = SetFloatMember(receiver, "radius", nadeContactRadius);
+
+        var animator = avatarRoot.GetComponentInChildren<Animator>(true);
+        var headBone = animator != null && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Head) : null;
+        Vector3 headPosition = headBone != null ? headBone.position : avatarRoot.transform.position;
+        if (headBone == null) sb.AppendLine("赤夜式 撫で音: [WARN] Head boneを取得できないためAvatar Root位置を使用します。");
+
+        var descriptor = avatarRoot.GetComponent("VRCAvatarDescriptor");
+        Vector3 viewPosition;
+        if (!TryGetVector3Member(descriptor, "ViewPosition", out viewPosition))
+        {
+            viewPosition = avatarRoot.transform.InverseTransformPoint(headPosition);
+            sb.AppendLine("赤夜式 撫で音: [WARN] ViewPositionを取得できないためHead bone位置を使用します。");
+        }
+        Undo.RecordObjects(new UnityEngine.Object[] { rxHeadMain, headSystem }, "Configure Nade contacts");
+        rxHeadMain.position = headPosition + avatarRoot.transform.up * nadeHeadOffsetY;
+        headSystem.position = avatarRoot.transform.TransformPoint(viewPosition);
+        sb.AppendLine(string.Format("赤夜式 撫で音: [{0}] Contact Radius={1}, Contact Offset Y={2} を適用しました。", radiusSet ? "OK" : "WARN", nadeContactRadius, nadeHeadOffsetY));
+    }
+
+    private static bool SetFloatMember(object target, string name, float value)
+    {
+        if (target == null) return false;
+        var type = target.GetType();
+        var field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (field != null && field.FieldType == typeof(float)) { Undo.RecordObject((UnityEngine.Object)target, "Configure Nade Contact Radius"); field.SetValue(target, value); return true; }
+        var property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (property != null && property.CanWrite && property.PropertyType == typeof(float)) { Undo.RecordObject((UnityEngine.Object)target, "Configure Nade Contact Radius"); property.SetValue(target, value, null); return true; }
+        return false;
+    }
+
+    private static bool TryGetVector3Member(object target, string name, out Vector3 value)
+    {
+        value = default(Vector3);
+        if (target == null) return false;
+        var type = target.GetType();
+        var field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (field != null && field.FieldType == typeof(Vector3)) { value = (Vector3)field.GetValue(target); return true; }
+        var property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (property != null && property.PropertyType == typeof(Vector3)) { value = (Vector3)property.GetValue(target, null); return true; }
+        return false;
+    }
+
+    private Transform RequireNadeTransform(StringBuilder sb, Transform root, string path)
+    {
+        var found = root != null ? root.Find(path) : null;
+        if (found == null && root != null && path.IndexOf('/') < 0)
+            found = root.GetComponentsInChildren<Transform>(true).FirstOrDefault(t => t.name == path);
+        if (found == null) sb.AppendLine("赤夜式 撫で音: [ERROR] 必須オブジェクト '" + path + "' が見つかりません。NadeSystem Prefabの構造が想定と異なる可能性があります。");
+        return found;
+    }
+
+    private GameObject InstantiateNadePrefab(GameObject prefab, Transform parent, StringBuilder sb, string label)
+    {
+        if (prefab == null) { sb.AppendLine("赤夜式 撫で音: [ERROR] " + label + " Prefabが見つかりません。"); return null; }
+        if (parent == null) { sb.AppendLine("赤夜式 撫で音: [ERROR] " + label + " の追加先が見つかりません。"); return null; }
+        var instance = PrefabUtility.InstantiatePrefab(prefab, parent) as GameObject;
+        if (instance == null) { sb.AppendLine("赤夜式 撫で音: [ERROR] " + label + " の追加に失敗しました。"); return null; }
+        Undo.RegisterCreatedObjectUndo(instance, "Add " + label);
+        return instance;
+    }
+
+    private GameObject FindNadePrefab(string guid, string prefabName)
+    {
+        GameObject cached;
+        if (nadePrefabCache.TryGetValue(prefabName, out cached)) return cached;
+        var path = AssetDatabase.GUIDToAssetPath(guid);
+        var prefab = string.IsNullOrEmpty(path) ? null : AssetDatabase.LoadAssetAtPath<GameObject>(path);
+        if (prefab != null) { nadePrefabCache[prefabName] = prefab; return prefab; }
+        foreach (var candidateGuid in AssetDatabase.FindAssets("t:Prefab " + prefabName))
+        {
+            prefab = AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(candidateGuid));
+            if (prefab != null && prefab.name == prefabName) { nadePrefabCache[prefabName] = prefab; return prefab; }
+        }
+        nadePrefabCache[prefabName] = null;
+        return null;
+    }
+
+    private static string OnOff(bool value) { return value ? "ON" : "OFF"; }
 
     private void InstallPrefabByName(StringBuilder sb, GameObject avatarRoot, string label, string[] prefabNames, bool apply)
     {
