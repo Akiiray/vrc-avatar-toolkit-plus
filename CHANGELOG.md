@@ -1,5 +1,19 @@
 # 変更履歴
 
+## v0.2.17 - 2026-08-16
+
+### Fixed
+
+- Avatar Setup で LAC Preset の表示だけが変わり、内部設定が選択した Preset と一致しない問題を修正しました。
+- LAC 公式の `ApplyPreset(CompressorPreset)` を Reflection で呼び出し、Preset 依存設定をまとめて反映するようにしました。
+
+### Changed
+
+- Avatar Setup の型検索、Prefab検索、ツール導入状態、選択Avatar導入状態をキャッシュし、通常の `OnGUI` からProject全体検索とコンポーネント走査を排除しました。
+- ツール導入状態、赤夜式 撫で音ギミック設定、詳細ログをデフォルトで閉じたFoldoutへ整理しました。
+- DryRunと導入実行の成功・警告・エラーを常時確認できる簡易実行結果を追加し、詳細ログの高さを固定ScrollViewへ変更しました。
+- 小さいウィンドウでも主要操作へ到達できるよう、メイン領域にScrollViewを追加しました。
+
 ## v0.2.16 - 2026-08-01
 
 ### Added
