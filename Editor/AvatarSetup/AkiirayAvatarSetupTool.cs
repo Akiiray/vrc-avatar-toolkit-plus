@@ -97,8 +97,27 @@ public class AkiirayAvatarSetupTool : EditorWindow
         public List<GameObject> InstalledRoots = new List<GameObject>();
     }
 
+    private sealed class ToolDependencySnapshot
+    {
+        public bool Checked;
+        public string Aao = "未判定";
+        public string Lac = "未判定";
+        public string Rbs = "未判定";
+        public string Nade = "未判定";
+        public string LightLimitChanger = "未判定";
+        public string KawaiiPose = "未判定";
+    }
+
+    private sealed class AvatarInstallStatusSnapshot
+    {
+        public string TargetKey;
+        public string Aao, Lac, Rbs, Nade, LightLimitChanger, KawaiiPose;
+    }
+
+    private enum LastRunStatus { NotRun, Success, Warning, Error }
+
     private Vector2 scroll;
-    private Vector2 dryRunSummaryScroll;
+    private Vector2 mainScroll;
     private string log = "";
     private string detailedLog = "";
     private readonly List<string> lastDryRunSummary = new List<string>();
@@ -108,12 +127,20 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private bool requireAvatarDescriptor = true;
     private bool toolStatusChecked = false;
     private string avatarInstallStatusTargetKey = "";
+    private readonly ToolDependencySnapshot dependencySnapshot = new ToolDependencySnapshot();
+    private AvatarInstallStatusSnapshot avatarInstallStatusSnapshot;
+    private LastRunStatus lastDryRunStatus;
+    private LastRunStatus lastApplyStatus;
+    private bool showToolDependencyStatus;
+    private bool showNadeSystemSettings;
+    private bool showDetailedLog;
     private List<GameObject> hierarchyAvatarSlots = new List<GameObject>();
     private List<SetupTarget> cachedTargets = new List<SetupTarget>();
     private string cachedTargetKey = "";
     private bool targetCacheDirty = true;
     private bool lastTargetScanCanceled = false;
     private readonly Dictionary<string, string> kawaiiPrefabPathCache = new Dictionary<string, string>();
+    private readonly Dictionary<string, string> prefabPathCache = new Dictionary<string, string>();
     private readonly Dictionary<string, GameObject> nadePrefabCache = new Dictionary<string, GameObject>();
     private readonly List<UnityEngine.Object> kawaiiPresetDefinesCache = new List<UnityEngine.Object>();
     private bool kawaiiPresetDefinesCacheReady = false;
@@ -140,6 +167,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private KawaiiPoseInstallBehavior kawaiiPoseInstallBehavior = KawaiiPoseInstallBehavior.AutoApplyPresetSkipPrebuild;
 
     private const string AAOTypeName = "Anatawa12.AvatarOptimizer.TraceAndOptimize";
+    private static readonly Dictionary<string, Type> TypeCache = new Dictionary<string, Type>();
     private const string LACTypeName = "dev.limitex.avatar.compressor.TextureCompressor";
     private const string LACPresetEnumTypeName = "dev.limitex.avatar.compressor.CompressorPreset";
     private const string LLCV2ComponentTypeName = "io.github.azukimochi.LightLimitChangerComponent";
@@ -269,12 +297,14 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void OnGUI()
     {
+        mainScroll = EditorGUILayout.BeginScrollView(mainScroll);
         EditorGUILayout.LabelField("VRC Avatar Toolkit Plus - Avatar Setup", EditorStyles.boldLabel);
 
         var previewTargets = DrawTargetArea();
         DrawDependencyStatusCards();
         DrawInstallOptionsAndDryRun(previewTargets);
         DrawDetailedLog();
+        EditorGUILayout.EndScrollView();
     }
 
     private List<SetupTarget> DrawTargetArea()
@@ -325,9 +355,10 @@ public class AkiirayAvatarSetupTool : EditorWindow
             {
                 if (GUILayout.Button("導入状態チェック", GUILayout.Height(28)))
                 {
-                    toolStatusChecked = true;
+                    RefreshToolDependencySnapshot();
                     detailedLog = Run(false, true);
                     log = BuildConciseLog(detailedLog);
+                    RefreshAvatarInstallStatusSnapshot(previewTargets);
                 }
 
                 if (GUILayout.Button("すべて導入を選択", GUILayout.Height(28)))
@@ -343,20 +374,22 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private void DrawDependencyStatusCards()
     {
+        showToolDependencyStatus = EditorGUILayout.Foldout(showToolDependencyStatus, "ツール導入状態", true);
+        if (!showToolDependencyStatus)
+            return;
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            EditorGUILayout.LabelField("ツール導入状態", EditorStyles.boldLabel);
-            if (!toolStatusChecked)
+            if (!dependencySnapshot.Checked)
                 EditorGUILayout.HelpBox("導入状態チェックを実行すると、各ツールの導入状態をカードに表示します。", MessageType.Info);
 
             var cards = new[]
             {
-                new { Name = "AAO", Status = GetTypeToolDependencyState(AAOTypeName) },
-                new { Name = "LAC", Status = GetTypeToolDependencyState(LACTypeName) },
-                new { Name = "RBS", Status = GetPrefabToolDependencyState(RBSPrefabNames) },
-                new { Name = "赤夜式 撫で音", Status = FormatToolDependencyStatus(IsNadeSystemToolAvailable()) },
-                new { Name = "LightLimitChanger", Status = GetLightLimitChangerDependencyState() },
-                new { Name = "可愛いポーズ", Status = GetTypeToolDependencyState(KawaiiComponentTypeName) },
+                new { Name = "AAO", Status = dependencySnapshot.Aao },
+                new { Name = "LAC", Status = dependencySnapshot.Lac },
+                new { Name = "RBS", Status = dependencySnapshot.Rbs },
+                new { Name = "赤夜式 撫で音", Status = dependencySnapshot.Nade },
+                new { Name = "LightLimitChanger", Status = dependencySnapshot.LightLimitChanger },
+                new { Name = "可愛いポーズ", Status = dependencySnapshot.KawaiiPose },
             };
 
             int columns = position.width >= 760f ? 3 : 2;
@@ -404,14 +437,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     {
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                using (new EditorGUILayout.VerticalScope(GUILayout.MinWidth(300), GUILayout.ExpandWidth(true)))
-                    DrawInstallOptions(previewTargets);
-
-                using (new EditorGUILayout.VerticalScope(GUILayout.Width(Mathf.Max(220f, position.width * 0.36f))))
-                    DrawDryRunSummary();
-            }
+            DrawInstallOptions(previewTargets);
 
             bool hasTargets = (previewTargets != null && previewTargets.Count > 0) || CanRefreshTargetsForRun();
             if (!hasTargets)
@@ -421,21 +447,23 @@ public class AkiirayAvatarSetupTool : EditorWindow
             {
                 if (DrawRunButton("導入テスト（DryRun）", hasTargets, 34))
                 {
-                    toolStatusChecked = true;
-                    avatarInstallStatusTargetKey = GetSingleAvatarInstallStatusTargetKey(previewTargets);
                     detailedLog = Run(false, false);
                     log = BuildConciseLog(detailedLog);
                     UpdateLastDryRunSummary(detailedLog);
+                    lastDryRunStatus = GetRunStatus(detailedLog);
+                    RefreshAvatarInstallStatusSnapshot(previewTargets);
                 }
 
                 if (DrawRunButton("導入実行", hasTargets, 34))
                 {
-                    toolStatusChecked = true;
-                    avatarInstallStatusTargetKey = GetSingleAvatarInstallStatusTargetKey(previewTargets);
                     detailedLog = Run(true, false);
                     log = BuildConciseLog(detailedLog);
+                    lastApplyStatus = GetRunStatus(detailedLog);
+                    RefreshAvatarInstallStatusSnapshot(previewTargets);
                 }
             }
+            EditorGUILayout.LabelField("簡易実行結果", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("DryRun: " + FormatRunStatus(lastDryRunStatus) + "    導入実行: " + FormatRunStatus(lastApplyStatus));
         }
     }
 
@@ -481,10 +509,12 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
 
         EditorGUILayout.HelpBox("入れ直しを有効にすると、対象アバター内の既存Prefabを削除してから再導入します。手動調整済みの設定は失われる可能性があります。DryRunで確認してから実行してください。", MessageType.Warning);
-        if (addNadeSystem)
+        using (new EditorGUI.DisabledScope(!addNadeSystem))
         {
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("赤夜式 撫で音ギミック設定", EditorStyles.boldLabel);
+            showNadeSystemSettings = EditorGUILayout.Foldout(showNadeSystemSettings, "赤夜式 撫で音ギミック設定", true);
+        }
+        if (showNadeSystemSettings)
+        {
             installNadeShadowForHands = EditorGUILayout.ToggleLeft("手へ影シェーダーを導入", installNadeShadowForHands);
             installNadeShadowForHead = EditorGUILayout.ToggleLeft("頭へ影シェーダーを導入", installNadeShadowForHead);
             installNadeFootSystem = EditorGUILayout.ToggleLeft("足へ撫で音ギミックを導入", installNadeFootSystem);
@@ -526,38 +556,22 @@ public class AkiirayAvatarSetupTool : EditorWindow
         }
     }
 
-    private void DrawDryRunSummary()
-    {
-        EditorGUILayout.LabelField("前回のDryRun結果", EditorStyles.boldLabel);
-        using (new EditorGUILayout.VerticalScope("box", GUILayout.MinHeight(135)))
-        {
-            if (lastDryRunSummary.Count == 0)
-            {
-                EditorGUILayout.LabelField("まだDryRunは実行されていません", EditorStyles.wordWrappedLabel);
-                return;
-            }
-
-            dryRunSummaryScroll = EditorGUILayout.BeginScrollView(dryRunSummaryScroll, GUILayout.MinHeight(110));
-            foreach (var line in lastDryRunSummary)
-                EditorGUILayout.LabelField(line, EditorStyles.wordWrappedLabel);
-            EditorGUILayout.EndScrollView();
-        }
-    }
-
     private void DrawDetailedLog()
     {
+        showDetailedLog = EditorGUILayout.Foldout(showDetailedLog, "詳細ログ", true);
+        if (!showDetailedLog)
+            return;
         using (new EditorGUILayout.VerticalScope("box"))
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("詳細ログ", EditorStyles.boldLabel);
                 if (GUILayout.Button("クリップボードコピー", GUILayout.Width(150)))
                     EditorGUIUtility.systemCopyBuffer = string.IsNullOrEmpty(detailedLog) ? log : detailedLog;
                 if (GUILayout.Button("別ウィンドウで表示", GUILayout.Width(150)))
                     AvatarSetupLogWindow.ShowLog(string.IsNullOrEmpty(detailedLog) ? log : detailedLog);
             }
 
-            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.ExpandHeight(true));
+            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(240));
             EditorGUILayout.TextArea(log, GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
         }
@@ -669,22 +683,72 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private void DrawSingleAvatarInstallStatus(List<SetupTarget> previewTargets)
     {
         var statusTargetKey = GetSingleAvatarInstallStatusTargetKey(previewTargets);
-        if (string.IsNullOrEmpty(statusTargetKey) || statusTargetKey != avatarInstallStatusTargetKey)
-            return;
-
-        var avatarRoot = GetAvatarRootForInstallStatus(previewTargets[0]);
-        if (avatarRoot == null)
+        if (string.IsNullOrEmpty(statusTargetKey) || avatarInstallStatusSnapshot == null ||
+            statusTargetKey != avatarInstallStatusSnapshot.TargetKey)
             return;
 
         EditorGUILayout.Space(4);
         EditorGUILayout.LabelField("選択アバターの導入状態", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("AAO", GetAvatarComponentInstallState(avatarRoot, AAOTypeName));
-        EditorGUILayout.LabelField("LAC", GetAvatarComponentInstallState(avatarRoot, LACTypeName));
-        EditorGUILayout.LabelField("RBS", GetRbsAvatarInstallState(avatarRoot));
-        EditorGUILayout.LabelField("赤夜式 撫で音", GetAvatarNadeInstallState(avatarRoot));
-        EditorGUILayout.LabelField("LightLimitChanger", GetLightLimitChangerAvatarInstallState(avatarRoot));
-        EditorGUILayout.LabelField("可愛いポーズ", GetAvatarKawaiiInstallState(avatarRoot));
+        EditorGUILayout.LabelField("AAO", avatarInstallStatusSnapshot.Aao);
+        EditorGUILayout.LabelField("LAC", avatarInstallStatusSnapshot.Lac);
+        EditorGUILayout.LabelField("RBS", avatarInstallStatusSnapshot.Rbs);
+        EditorGUILayout.LabelField("赤夜式 撫で音", avatarInstallStatusSnapshot.Nade);
+        EditorGUILayout.LabelField("LightLimitChanger", avatarInstallStatusSnapshot.LightLimitChanger);
+        EditorGUILayout.LabelField("可愛いポーズ", avatarInstallStatusSnapshot.KawaiiPose);
         EditorGUILayout.Space(4);
+    }
+
+    private void RefreshAvatarInstallStatusSnapshot(List<SetupTarget> targets)
+    {
+        avatarInstallStatusSnapshot = null;
+        avatarInstallStatusTargetKey = GetSingleAvatarInstallStatusTargetKey(targets);
+        if (string.IsNullOrEmpty(avatarInstallStatusTargetKey)) return;
+        var root = GetAvatarRootForInstallStatus(targets[0]);
+        if (root == null) return;
+        avatarInstallStatusSnapshot = new AvatarInstallStatusSnapshot
+        {
+            TargetKey = avatarInstallStatusTargetKey,
+            Aao = GetAvatarComponentInstallState(root, AAOTypeName),
+            Lac = GetAvatarComponentInstallState(root, LACTypeName),
+            Rbs = GetRbsAvatarInstallState(root),
+            Nade = GetAvatarNadeInstallState(root),
+            LightLimitChanger = GetLightLimitChangerAvatarInstallState(root),
+            KawaiiPose = GetAvatarKawaiiInstallState(root)
+        };
+    }
+
+    private void RefreshToolDependencySnapshot()
+    {
+        TypeCache.Clear();
+        prefabPathCache.Clear();
+        kawaiiPrefabPathCache.Clear();
+        nadePrefabCache.Clear();
+        toolStatusChecked = true;
+        dependencySnapshot.Checked = true;
+        dependencySnapshot.Aao = GetTypeToolDependencyState(AAOTypeName);
+        dependencySnapshot.Lac = GetTypeToolDependencyState(LACTypeName);
+        dependencySnapshot.Rbs = GetPrefabToolDependencyState(RBSPrefabNames);
+        dependencySnapshot.Nade = FormatToolDependencyStatus(IsNadeSystemToolAvailable());
+        dependencySnapshot.LightLimitChanger = GetLightLimitChangerDependencyState();
+        dependencySnapshot.KawaiiPose = FormatToolDependencyStatus(IsKawaiiPoseToolAvailable());
+    }
+
+    private static LastRunStatus GetRunStatus(string text)
+    {
+        if (text != null && text.Contains("[ERROR]")) return LastRunStatus.Error;
+        if (text != null && text.Contains("[WARN]")) return LastRunStatus.Warning;
+        return LastRunStatus.Success;
+    }
+
+    private static string FormatRunStatus(LastRunStatus status)
+    {
+        switch (status)
+        {
+            case LastRunStatus.Success: return "✓ 成功";
+            case LastRunStatus.Warning: return "! 警告（詳細ログを確認）";
+            case LastRunStatus.Error: return "! エラー（詳細ログを確認）";
+            default: return "未実行";
+        }
     }
 
     private string GetSingleAvatarInstallStatusTargetKey(List<SetupTarget> previewTargets)
@@ -1265,6 +1329,7 @@ public class AkiirayAvatarSetupTool : EditorWindow
     private void InvalidateTargetCache(bool clearTargets = false)
     {
         targetCacheDirty = true;
+        avatarInstallStatusSnapshot = null;
         if (clearTargets)
         {
             cachedTargets.Clear();
@@ -1660,14 +1725,44 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
         if (!apply)
         {
-            sb.AppendLine("LAC: [DRY] Set Preset=" + presetName);
+            var dryApplyPreset = lacType.GetMethod("ApplyPreset", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                null, new[] { enumType }, null);
+            sb.AppendLine(dryApplyPreset != null
+                ? "LAC: [DRY] Preset=" + presetName + " を公式ApplyPresetで適用予定です。"
+                : "LAC: [WARN] Preset名のみ設定予定です。公式ApplyPresetが見つからないため内部設定の完全な反映を保証できません。");
             return;
         }
 
         Undo.RecordObject(comp, "Set LAC Preset");
-        presetField.SetValue(comp, Enum.Parse(enumType, presetName));
+        var presetValue = Enum.Parse(enumType, presetName);
+        var applyPreset = lacType.GetMethod("ApplyPreset", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+            null, new[] { enumType }, null);
+        if (applyPreset != null)
+        {
+            applyPreset.Invoke(comp, new[] { presetValue });
+            sb.AppendLine("LAC: [OK] Preset=" + presetName + " を公式ApplyPresetで適用しました。");
+            AppendLacPresetValues(sb, comp, lacType);
+        }
+        else
+        {
+            presetField.SetValue(comp, presetValue);
+            sb.AppendLine("LAC: [WARN] Preset名は設定しましたが、公式ApplyPresetが見つからないため内部設定の完全な反映を保証できません。");
+        }
         EditorUtility.SetDirty(comp);
-        sb.AppendLine("LAC: [OK] Preset=" + presetName);
+    }
+
+    private static void AppendLacPresetValues(StringBuilder sb, Component comp, Type type)
+    {
+        string Read(string name)
+        {
+            var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null) return Convert.ToString(field.GetValue(comp));
+            var property = type.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            return property != null ? Convert.ToString(property.GetValue(comp, null)) : "?";
+        }
+        sb.AppendLine("LAC: [INFO] Divisor=" + Read("MinDivisor") + "x-" + Read("MaxDivisor") +
+            "x / Resolution=" + Read("MinResolution") + "px-" + Read("MaxResolution") +
+            "px / Complexity=" + Read("LowComplexityThreshold") + "-" + Read("HighComplexityThreshold"));
     }
 
     private void InstallLightLimitChangerWithReinstall(StringBuilder sb, GameObject avatarRoot, bool apply)
@@ -2629,11 +2724,22 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private GameObject FindPrefabByNames(string[] names)
     {
-        foreach (var path in LLCPrefabPaths)
+        var cacheKey = string.Join("|", names);
+        if (prefabPathCache.TryGetValue(cacheKey, out var cachedPath))
+            return string.IsNullOrEmpty(cachedPath) ? null : AssetDatabase.LoadAssetAtPath<GameObject>(cachedPath);
+
+        // LightLimitChanger 固有の既知パスは、そのファミリーを検索する場合だけ確認する。
+        if (ReferenceEquals(names, LLCPrefabNames))
         {
-            var explicitPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-            if (explicitPrefab != null && names.Contains(explicitPrefab.name))
-                return explicitPrefab;
+            foreach (var path in LLCPrefabPaths)
+            {
+                var explicitPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (explicitPrefab != null && names.Contains(explicitPrefab.name))
+                {
+                    prefabPathCache[cacheKey] = path;
+                    return explicitPrefab;
+                }
+            }
         }
 
         foreach (var name in names)
@@ -2646,10 +2752,14 @@ public class AkiirayAvatarSetupTool : EditorWindow
                 if (prefab == null) continue;
 
                 if (prefab.name == name || names.Contains(prefab.name))
+                {
+                    prefabPathCache[cacheKey] = path;
                     return prefab;
+                }
             }
         }
 
+        prefabPathCache[cacheKey] = "";
         return null;
     }
 
@@ -2695,18 +2805,25 @@ public class AkiirayAvatarSetupTool : EditorWindow
 
     private static Type FindType(string fullName)
     {
+        if (TypeCache.TryGetValue(fullName, out var cached))
+            return cached;
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
         {
             try
             {
                 var type = asm.GetType(fullName);
-                if (type != null) return type;
+                if (type != null)
+                {
+                    TypeCache[fullName] = type;
+                    return type;
+                }
             }
             catch
             {
                 // ignored
             }
         }
+        TypeCache[fullName] = null;
         return null;
     }
 
