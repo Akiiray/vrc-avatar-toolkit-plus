@@ -47,7 +47,7 @@
 ## コーディング方針
 
 - Unity 2022.3 の IMGUI / EditorWindow でコンパイルできることを優先します。
-- 外部パッケージの型には直接参照せず、必要に応じて Reflection や `SerializedObject` を使います。
+- manifest / asmdefに宣言済みの必須VRChat SDKは直接参照できます。Optionalな外部ツールを必須compile-time依存にせず、公開APIや `SerializedObject` を優先し、Reflectionを使う場合は対象と互換性を確認します。
 - asmdef の依存関係を不用意に増やさないでください。
 - `AssetDatabase.FindAssets` や Prefab 走査など重い処理を `OnGUI()` で毎回実行しないでください。
 - Project 全体やフォルダ内 Prefab の走査は、明示的なボタン操作やキャッシュ方式を使います。
