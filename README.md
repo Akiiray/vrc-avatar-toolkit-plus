@@ -26,6 +26,24 @@ VRC Avatar Toolkit Plus は、VRChat アバター制作・改変作業を効率�
 
 # 主な機能
 
+## Avatar Preflight Fixer
+
+`Tools > VRC Avatar Toolkit Plus > Avatar Preflight Fixer`
+
+SDK 3.10.5のビルド阻害エラーを基準に、複数アバターが参照するImporterを一括修正します。
+
+* Hierarchyで選択中のアバター、Hierarchy内の全アバター、指定フォルダ内のPrefabに対応します。
+* 非アクティブな対象、Prefab Variant、Nested Prefab、サブフォルダ検索に対応します。
+* Read/Write、BlendShape Normals、Streaming Mip Mapsを個別に有効・無効にできます。
+* 解析で変更前後・参照元・フォルダ外アセット・スキップ理由を確認してから適用します。
+* 共有Importerは重複修正せず、同じモデルの複数設定変更を1回の再インポートにまとめます。Prefab自体は保存しません。
+
+BlendShape NormalsはSDK Auto Fix相当のLegacy有効化（初期値）、Import、Noneから選択できます。既にSDKチェックを通過する設定は変更しません。StreamingのPriorityと既存Mip Maps設定は維持します。
+
+共有モデルへの変更は選択外アバターや同じモデル内の他Meshにも影響し、BlendShape方式は陰影を変える場合があります。`Packages/`配下や読み取り専用アセットは修正しません。SDK 3.10.5以外とUnity Editorでの実機動作は未検証です。
+
+運用手順、判定条件、制限、検証項目は [Avatar Preflight Fixer](Documentation~/AvatarPreflightFixer.md) を参照してください。
+
 ## Avatar Setup
 
 `Tools > VRC Avatar Toolkit Plus > Avatar Setup`

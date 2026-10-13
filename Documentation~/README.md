@@ -4,6 +4,9 @@
 
 - `Tools > VRC Avatar Toolkit Plus > Avatar Setup > Window`
 - `Tools > VRC Avatar Toolkit Plus > デバッグ > Avatar Debug Reporter`
+- `Tools > VRC Avatar Toolkit Plus > Avatar Preflight Fixer`
+
+Avatar Preflight Fixerの手順・判定条件・安全性は [専用ドキュメント](AvatarPreflightFixer.md) を参照してください。
 
 ## Avatar Setup Window の対象モード
 
