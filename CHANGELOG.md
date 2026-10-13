@@ -1,5 +1,21 @@
 # 変更履歴
 
+## v0.2.18 - 2026-10-14
+
+### Added
+
+- Avatar Preflight Fixerを追加しました。
+- Hierarchy内の選択アバター・全アバター、および指定フォルダ内Prefabの一括解析に対応しました。
+- VRCSDK 3.10.5のRead/Write、BlendShape Normals、Streaming Mip Mapsのエラー条件に対応するImporter一括修正機能を追加しました。
+- BlendShape NormalsのSDK Auto Fix相当、Import、Noneの3方式を選択可能にしました。
+- 修正前の変更プレビュー、参照元表示、共有Importerの重複排除、修正後の再検証に対応しました。
+
+### Notes
+
+- Streaming Mip Mapsの修正では、既存Priorityを維持します。
+- Continuous Avatar Uploaderとは直接連携せず、連続アップロード前の事前修正ツールとして利用できます。
+- Unity Editorでの実コンパイル・動作検証は未実施です。
+
 ## v0.2.17 - 2026-08-16
 
 ### Fixed
