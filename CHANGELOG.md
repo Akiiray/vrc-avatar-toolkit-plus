@@ -1,5 +1,17 @@
 # 変更履歴
 
+## v0.3.0 - 開発中
+
+### Added
+
+- 導入済みのRealKissSystemとJustKissSFXを調整する専用ウィンドウを追加しました。
+- 複数Visemeを使った位置推定、Scene Viewのプレビュー、微調整、一括適用とUndo／Redoに対応しました。
+
+### Notes
+
+- 負・非一様スケールや有効なVisemeが不足する場合は自動調整を停止します。
+- Unityでの手動操作とVRChat実機でのContact発火・音源追従は未検証です。
+
 ## v0.2.18 - 2026-10-14
 
 ### Added

@@ -73,6 +73,10 @@ BlendShape NormalsはSDK Auto Fix相当のLegacy有効化（初期値）、Impor
 
 ---
 
+## Kissギミック位置調整
+
+導入済みの RealKissSystem・JustKissSFX の位置を推定し、Scene View で確認・微調整してから適用できます。 [操作・対応構成](Documentation~/KissPositionAdjuster.md)
+
 ## Material Copy
 
 `Tools > VRC Avatar Toolkit Plus > Material > Material Copy Window`
